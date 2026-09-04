@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="sipario">
+  <title>sipario</title>
+  <!-- The curtain up on an empty stage.
+
+       sipario ships no templates and no design, so the one thing the mark must
+       not do is show a slide with something on it. What the curtain reveals is
+       blank paper: the engine gives you the theatre, and what goes on the stage
+       is the talk's alone. A mark carrying a specimen headline would argue the
+       opposite of the README.
+
+       Colours are the `stylish` starter's own tokens rather than new ones:
+       accent #b3121f, ground-deep #3b0812, accent-lit #d9b25c and
+       ink-lit #fdf8ee, so the logo and the deck that ships in the package
+       are the same object. The pleat red is the one shade invented here.
+
+       The scalloped valance is doing the load-bearing work. Without it the two
+       panels read as plain bars and the mark says "a light between two blocks";
+       the swags are the only thing that makes it fabric. The pleats are the
+       opposite: they enrich the panels above ~128px and disappear below it,
+       which is the right way round for detail to fail.
+
+       The revealed paper is exactly 16:9 and inset from the panels on all four
+       sides, so it reads as a slide standing on a stage rather than as a
+       letterbox band spanning the opening. It sits above geometric centre,
+       where the eye expects a focal object to be. -->
+  <defs>
+    <clipPath id="tile"><rect width="512" height="512" rx="112"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="512" height="512" fill="#3b0812"/>
+
+    <!-- the stage: blank, 16:9 where it shows -->
+    <rect x="150" y="258" width="212" height="119" fill="#fdf8ee"/>
+
+    <!-- the panels, hung from behind the valance -->
+    <rect x="0"   y="100" width="136" height="412" fill="#b3121f"/>
+    <rect x="376" y="100" width="136" height="412" fill="#b3121f"/>
+    <g fill="#8d0e18">
+      <rect x="42"  y="150" width="10" height="362"/>
+      <rect x="92"  y="150" width="10" height="362"/>
+      <rect x="410" y="150" width="10" height="362"/>
+      <rect x="460" y="150" width="10" height="362"/>
+    </g>
+
+    <!-- the valance, and the gold of a theatre bill along its edge -->
+    <path fill="#b3121f" d="M0 0 H512 V132
+      Q448 176 384 132 Q320 176 256 132 Q192 176 128 132 Q64 176 0 132 Z"/>
+    <path fill="none" stroke="#d9b25c" stroke-width="7" stroke-linecap="round"
+      d="M0 132 Q64 176 128 132 Q192 176 256 132 Q320 176 384 132 Q448 176 512 132"/>
+  </g>
+</svg>

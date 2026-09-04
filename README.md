@@ -15,6 +15,10 @@ by name rather than quietly handed somebody else's look.
 
 The name is Italian for the theatre curtain.
 
+<img src="docs/logo.png" width="140"
+  alt="The sipario mark: a theatre curtain, drawn back and hung from a
+       scalloped valance, on a stage holding one blank slide.">
+
 ## Starting a talk
 
 ```bash
