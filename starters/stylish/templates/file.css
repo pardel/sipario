@@ -1,0 +1,12 @@
+/* The path is chrome on the slip, not a caption under it: it says the
+   lines below were read off disk, so it is attached to them. */
+
+.slide.template-file .stage { align-items: center; }
+
+.file-sheet {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.file-path { margin: 0 0 8px; }

@@ -1,0 +1,18 @@
+.slide.template-close { background: var(--ground); }
+
+.slide.template-close .stage { justify-content: center; }
+
+.close-word { font-size: 76px; letter-spacing: -1px; }
+
+.close-links { margin-top: 42px; }
+
+.close-link {
+  font-family: var(--mono);
+  font-size: 25px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.close-link-note { font-size: 17px; color: var(--ink-faint); margin: 4px 0 26px; }
+
+.close-colophon { margin-top: auto; font-size: 15px; color: var(--ink-faint); }

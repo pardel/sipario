@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 200" preserveAspectRatio="xMinYMid meet"
+     font-family="Inter, system-ui, sans-serif" font-size="15">
+  <g class="layer" data-layer="source">
+    <rect x="8" y="60" width="180" height="72" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+    <text x="98" y="94" text-anchor="middle" fill="#334155">one markdown file</text>
+    <text x="98" y="114" text-anchor="middle" fill="#64748b" font-size="13">the talk</text>
+  </g>
+  <g class="layer" data-layer="output">
+    <path d="M196 96h64" stroke="#94a3b8" stroke-width="2" marker-end="url(#b)"/>
+    <rect x="268" y="60" width="204" height="72" rx="8" fill="#f0fdfa" stroke="#14b8a6"/>
+    <text x="370" y="94" text-anchor="middle" fill="#0d9488">rendered per request</text>
+    <text x="370" y="114" text-anchor="middle" fill="#0d9488" font-size="13">nothing on disk to go stale</text>
+  </g>
+  <defs><marker id="b" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M0 0 8 4 0 8z" fill="#94a3b8"/></marker></defs>
+</svg>

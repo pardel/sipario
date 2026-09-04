@@ -1,0 +1,40 @@
+.slide.template-statement .stage {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+/* `pretty`, not `balance`: balance re-breaks lines that were already
+   right; pretty only refuses to leave a last word alone. Every line is
+   set the same, the one landing and the ones already given, because the
+   pair has to read as a build rather than a swap. */
+
+p.statement-line {
+  font-family: var(--head);
+  font-weight: 500;
+  font-size: 58px;
+  line-height: 1.14;
+  color: var(--ink);
+  max-width: 22ch;
+  text-wrap: pretty;
+}
+
+p.statement-carry {
+  font-family: var(--head);
+  font-weight: 500;
+  font-size: 58px;
+  line-height: 1.14;
+  color: var(--ink);
+  max-width: 22ch;
+  text-wrap: pretty;
+  margin-bottom: 22px;
+}
+
+/* A title, when the slide has one: a small italic line above the rule,
+   the stage direction before the line is spoken. */
+
+.statement-title {
+  font-style: italic;
+  font-size: 22px;
+  color: var(--ink-soft);
+}

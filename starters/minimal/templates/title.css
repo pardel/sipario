@@ -1,0 +1,23 @@
+.title-author { font-size: 19px; color: var(--ink-soft); }
+
+.slide.template-title { display: none; }
+
+.slide.template-title.current { display: block; }
+
+.slide.template-title .stage { justify-content: center; }
+
+.slide.template-title h1 { font-size: 62px; max-width: 20ch; }
+
+/* Wide enough for the standfirst to hold one line: at 44ch it broke
+   after "writes" and left "into" alone underneath. `balance` is the
+   insurance, so a longer one splits into even lines rather than
+   stranding its last word again. */
+
+.title-subtitle {
+  margin-top: 22px;
+  font-size: 25px;
+  max-width: 60ch;
+  text-wrap: balance;
+}
+
+.title-author { margin-top: 4px; }

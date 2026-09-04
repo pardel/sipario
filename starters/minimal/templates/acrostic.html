@@ -1,0 +1,7 @@
+{{! The shape a framework name makes: a letter, a word, a gloss. }}
+
+{{#meta.kicker}}<p class="acrostic-kicker">{{meta.kicker}}</p>{{/meta.kicker}}
+<h2>{{meta.title}}</h2>
+<hr class="rule">
+
+{{#rows join="\n"}}<div class="acrostic-row"><span class="acrostic-letter">{{letter}}</span><span class="acrostic-word">{{word}}</span><span class="acrostic-gloss">{{gloss}}</span></div>{{/rows}}

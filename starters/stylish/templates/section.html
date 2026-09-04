@@ -1,0 +1,15 @@
+{{! Opens a movement and names it with its word, and may list what the
+    movement holds, numbered in the order it comes. }}
+
+<div class="section-mark">{{meta.letter}}</div>
+
+<div class="section-body">
+  <h2>{{word}}</h2>
+  <hr class="rule">
+  <p class="section-line">{{line|br}}</p>
+  {{#listed}}
+  <ol class="section-list">
+    {{#rows join="\n"}}<li class="section-item">{{text}}</li>{{/rows}}
+  </ol>
+  {{/listed}}
+</div>

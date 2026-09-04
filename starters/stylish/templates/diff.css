@@ -1,0 +1,10 @@
+/* Corrected the way a proof is: the line that goes is struck through in
+   pencil, the line that comes is written in red. */
+
+.slide.template-diff .stage { align-items: center; }
+
+.diff-add { color: var(--code-added); }
+
+.diff-del { color: var(--code-removed); text-decoration: line-through; }
+
+.diff-same { color: var(--code-ink); }

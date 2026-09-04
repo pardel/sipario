@@ -1,0 +1,25 @@
+/* A figure sits in the middle of the page under its heading. The svg is
+   sized by height and lets its width follow, so the box shrinks to the
+   drawing and the figure centres it, whatever the drawing's own
+   alignment attribute says. */
+
+.image-figure {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+  object-position: center center;
+}
+
+figure.image-figure {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+figure.image-figure > svg {
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+}

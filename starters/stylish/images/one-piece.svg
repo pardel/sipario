@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 200" preserveAspectRatio="xMinYMid meet"
+     font-family="Newsreader, Georgia, serif" font-size="16">
+  <rect x="8" y="60" width="130" height="72" fill="none" stroke="#000000" stroke-width="1.5"/>
+  <text x="73" y="101" text-anchor="middle" fill="#000000">deck.md</text>
+  <path d="M146 96h60" stroke="#000000" stroke-width="1.5" marker-end="url(#a)"/>
+  <rect x="214" y="60" width="130" height="72" fill="none" stroke="#000000" stroke-width="1.5"/>
+  <text x="279" y="101" text-anchor="middle" fill="#000000">templates/</text>
+  <path d="M352 96h60" stroke="#000000" stroke-width="1.5" marker-end="url(#a)"/>
+  <rect x="420" y="60" width="52" height="72" fill="none" stroke="#b3121f" stroke-width="1.5"/>
+  <text x="446" y="101" text-anchor="middle" fill="#b3121f">HTML</text>
+  <defs><marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M0 0 8 4 0 8z" fill="#000000"/></marker></defs>
+</svg>

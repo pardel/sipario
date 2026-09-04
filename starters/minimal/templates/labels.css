@@ -1,0 +1,24 @@
+.labels-row {
+  display: flex;
+  gap: 22px;
+  align-items: baseline;
+  padding: 16px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.labels-row:first-of-type { border-top: 0; }
+
+.labels-label {
+  font-family: var(--mono);
+  font-size: 21px;
+  font-weight: 700;
+  color: var(--label);
+  flex: 0 0 11ch;
+}
+
+.labels-row p { font-size: 19px; color: var(--ink-soft); }
+
+/* `align: tight` closes the rows for a list that has outgrown the
+   rhythm, as it does for an icon list. */
+
+.slide.align-tight .labels-row { padding: 4px 0; }

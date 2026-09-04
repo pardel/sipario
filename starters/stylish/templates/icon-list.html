@@ -1,0 +1,14 @@
+{{! Rows of an icon, a heading and a line, built a row at a time.
+
+    The standfirst is height-reserved like the rows are, but reserving is
+    not printing: a slide whose standfirst changes as it builds must show
+    this step's words, not the last step's. So the longest standfirst on
+    the slide is kept invisible to hold the height and this step's words
+    are laid over it. }}
+
+<h2>{{meta.title|br}}</h2>
+<hr class="rule">
+
+{{#plainSub}}<p class="icon-list-sub">{{ghost|inline}}</p>{{/plainSub}}{{#boxedSub}}<div class="icon-list-sub-box"><p class="icon-list-sub ghost">{{ghost|inline}}</p>{{#sub}}<p class="icon-list-sub over">{{sub|inline}}</p>{{/sub}}</div>{{/boxedSub}}
+
+{{#rows join="\n"}}{{#lead}}<p class="icon-list-lead{{cls|raw}}">{{lead|inline}}</p>{{/lead}}{{^lead}}<div class="icon-list-row{{cls|raw}}"><img class="icon-list-ico" src="{{imagePath|raw}}/icon-{{tag}}.svg" alt=""><div class="icon-list-row-text"><h3>{{head|inline}}</h3><p>{{body|inline}}</p></div></div>{{/lead}}{{/rows}}

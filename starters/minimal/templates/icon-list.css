@@ -1,0 +1,77 @@
+/* A standfirst that changes as the slide builds. The ghost is the last
+   step's wording, invisible, there only to hold the height so the rows
+   below never move; the live copy sits over it. */
+
+.icon-list-sub-box { position: relative; }
+
+.icon-list-sub-box .ghost { visibility: hidden; }
+
+.icon-list-sub-box .over { position: absolute; top: 0; left: 0; right: 0; }
+
+.icon-list-row {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  padding: 15px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.icon-list-row.first { border-top: 0; }
+
+/* Same rule as the statement lines: never leave the last word of a body
+   alone on its own line. `pretty` rather than `balance`, so a body that
+   already breaks well is left as it is. */
+
+.icon-list-row-text p {
+  font-size: 18px;
+  color: var(--ink-faint);
+  margin-top: 3px;
+  max-width: 76ch;
+  text-wrap: pretty;
+}
+
+.icon-list-ico {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  margin-top: 2px;
+}
+
+.icon-list-lead {
+  font-size: 20px;
+  color: var(--ink-soft);
+  max-width: 78ch;
+  margin-bottom: 14px;
+}
+
+/* `align:` in a slide's front matter says what to do with the room left
+   under the heading.
+
+   `bottom` drops the rows to the foot of the stage in one block, leaving
+   the gap between the standfirst and the first row.
+
+   `spread` splits it evenly above the first row and below the last, so
+   the items sit as a block with even air around them and keep their own
+   rhythm rather than being stretched apart to fill the stage. Hidden
+   rows take part too, which is what keeps a build from moving as it
+   runs. */
+
+.slide.align-bottom .icon-list-row.first,
+.slide.align-bottom .icon-list-lead.first { margin-top: auto; }
+
+.slide.align-bottom .icon-list-row.last { margin-bottom: 22px; }
+
+/* `tight` is for a list that has grown past what the default rhythm
+   holds: slide 3.2 builds from two gates to five, and at the usual
+   spacing the fifth ran 44px past the bottom of the stage. Closing the
+   rows keeps every word rather than trimming the reasoning to fit. */
+
+.slide.align-tight .icon-list-row { padding: 9px 0; }
+
+.slide.align-tight .icon-list-sub { margin-bottom: 12px; }
+
+.slide.align-spread .icon-list-row { padding: 21px 0; }
+
+.slide.align-spread .icon-list-row.first { margin-top: auto; }
+
+.slide.align-spread .icon-list-row.last { margin-bottom: auto; }

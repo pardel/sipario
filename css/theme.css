@@ -1,0 +1,579 @@
+/* The frame: everything outside a slide's stage.
+ *
+ * The deck's own furniture — the scaled 1280x720 stage, the stacks a
+ * build hangs from, the map, the progress bar, the compass, the notes and
+ * the overflow audit — plus the palette every talk starts from. None of
+ * it knows what a slide contains.
+ *
+ * What is *inside* a stage belongs to the talk, because it is the talk's
+ * templates that put it there. Those rules live in the talk's own
+ * the talk's css/index.css, which loads after this file and may replace anything
+ * here, the palette and the two typeface tokens included. A second talk
+ * restyles itself without editing a shared file.
+ *
+ * Colours are Tailwind defaults, carried from the pardel.dev design
+ * system (assets/css/main.css, about.html, assets/css/prism.css), because
+ * the site's tailwind.config.js extends nothing.
+ */
+/* The pardel.dev design system, carried over from the deck's theme.py.
+   Every value has a source in the site repo (assets/css/main.css,
+   about.html, assets/css/prism.css); colours are Tailwind defaults
+   because the site's tailwind.config.js extends nothing.
+
+   The fonts are the one thing the .pptx deck could never match: it
+   needed Inter and Raleway installed on the presenting machine and fell
+   back to Avenir Next and Helvetica Neue. Both are vendored in the talk's
+   assets/fonts/ now, so this renders identically anywhere, offline
+   included. The two family tokens below are defaults: a talk's
+   assets/fonts/fonts.css loads after this sheet and may replace them,
+   which is how a talk brings its own typography without touching
+   anything shared. */
+
+:root {
+  /* Colours are named for what they are for, not for what they are.
+     `--ink` and `--ground-deep` are the same value today and need not
+     stay that way; a talk that wants dark text on a lighter surround
+     changes one of them and the other holds.
+
+     The values come from the pardel.dev design system (assets/css/main.css,
+     about.html, assets/css/prism.css), which is Tailwind's defaults
+     because the site's tailwind.config.js extends nothing. The scale
+     names are gone on purpose: `--slate-500` told you a shade and left
+     you to guess where it belonged. */
+
+  /* Grounds. A slide is light; the surround and the panels are deep. */
+  --ground:            #ffffff;   /* a slide */
+  --ground-sunk:       #f8fafc;   /* a slide that steps back */
+  --ground-deep:       #0f172a;   /* the surround, a panel, a dark slide */
+  --ground-panel:      #1e293b;   /* a well inside a panel */
+
+  /* Ink on a light ground, loudest first. */
+  --ink:               #0f172a;   /* a heading, the line that lands */
+  --ink-body:          #334155;   /* body copy */
+  --ink-soft:          #475569;   /* a secondary line */
+  --ink-faint:         #64748b;   /* a standfirst, a caption, a gloss */
+
+  /* Ink on a deep ground, loudest first. */
+  --ink-lit:           #ffffff;
+  --ink-lit-body:      #f1f5f9;
+  --ink-lit-soft:      #e2e8f0;
+  --ink-lit-faint:     #cbd5e1;
+  --ink-lit-dim:       #94a3b8;
+  --ink-lit-dimmer:    #475569;   /* chrome that must recede over a dark slide */
+
+  /* The one accent, in its two grounds. */
+  --accent:            #0d9488;   /* on a light slide */
+  --accent-lit:        #14b8a6;   /* on a deep ground, where the darker one dies */
+
+  /* Lines. */
+  --hairline:          #e2e8f0;   /* between rows on a slide */
+  --hairline-deep:     #334155;   /* between things on a panel */
+  --hairline-deep-lit: #64748b;   /* the same line, under a pointer */
+
+  /* A terminal transcript, which is neither ground. */
+  --code-ground:       #2d2d2d;
+  --code-ink:          #cccccc;
+  --code-added:        #86efac;   /* a line a diff adds */
+  --code-removed:      #fca5a5;   /* a line a diff takes away */
+  --code-aside:        #94a3b8;   /* a note written beside a listing */
+
+  /* The four label inks. Named for the signal, not the hue, so a deck
+     that relabels its scheme keeps the meaning. */
+  --label-good:        #15803d;
+  --label-quiet:       #64748b;
+  --label-bad:         #b91c1c;
+  --label-note:        #9089fc;
+
+  /* Named by the talk, not here. A talk's assets/fonts/fonts.css loads
+     after this sheet and replaces both; these are what is left if it
+     does not, and they are the fallbacks the old .pptx deck actually hit
+     on a machine without the fonts installed. */
+  --head: 'Avenir Next', Helvetica, Arial, sans-serif;
+  --body: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, 'SF Mono', Monaco, Menlo, monospace;
+
+  /* The deck is authored at a fixed 1280x720 and scaled to fit. A fixed
+     stage is why nothing can reflow between this machine and the room,
+     which is the single property the PDF was chosen for. */
+  --w: 1280px;
+  --h: 720px;
+
+  /* The share of the width the docked notes take. Stated once: the deck's
+     scaling reads this same value out of CSS, and when the two were
+     written down separately one of them was going to move alone. */
+  --dock: 34%;
+}
+
+/* Slide classes are prefixed `template-` and content classes with the
+   name of the template that writes them.
+   They shared one namespace once: `.term` styled both the <pre> and the
+   <section class="slide term"> around it, painting the code background
+   over the whole slide, and `.statement` put a 24ch max-width on the
+   slide rather than on its line. Keep the prefix. */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--ground-deep);
+  font-family: var(--body);
+  color: var(--ink-body);
+  overflow: hidden;
+}
+
+/* The stacks are structure, not layout: `display: contents` keeps them
+   in the DOM for navigation and out of the box tree entirely, so the
+   43 of them cannot push the one visible slide around. Positioning is
+   set inline by fit(), which is the only thing that knows the scale. */
+#deck {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* Groups and stacks are structure, not layout: `display: contents` keeps
+   them in the DOM for navigation and out of the box tree entirely, so
+   neither can push the one visible slide around. The map turns them back
+   into boxes, which is the only place their shape is meant to show. */
+.group,
+.stack { display: contents; }
+
+.group-name { display: none; }
+
+/* ---------------------------------------------------------------- slide */
+
+.slide {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--w);
+  height: var(--h);
+  padding: 68px 76px 56px;
+  background: var(--ground);
+  color: var(--ink-body);
+  transform-origin: center center;
+  display: none;
+  overflow: hidden;
+}
+
+.slide.current { display: block; }
+
+.slide .stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The slide's number is not printed on the slide: it sits in the middle
+   of the compass, with the arrows. `data-n` stays on the section for the
+   map and the presenter to read. */
+
+/* notes never reach the projector; the presenter view reads them */
+.notes { display: none; }
+
+/* A progressive build keeps its unrevealed rows in the layout so the
+   visible ones never shift between slides. */
+.hidden-step { visibility: hidden; }
+
+/* ------------------------------------------------------------ progress */
+
+/* ---- the step indicator
+ *
+ * Bottom of the screen, on the slides that animate and nowhere else, so
+ * the absence of dots is itself the signal that a slide is whole. It is
+ * chrome rather than slide content, because `position: fixed` cannot
+ * escape the transform that scales a slide.
+ */
+
+#steps {
+  position: fixed;
+  left: 50%;
+  bottom: 13px;
+  transform: translateX(-50%);
+  z-index: 44;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  --steps-ink: var(--ink-lit-faint);
+}
+
+#steps span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--steps-ink);
+}
+
+#steps span.on {
+  background: var(--accent-lit);
+  box-shadow: none;
+}
+
+/* Precautionary, and it does not fire today: the only dark slide has one
+   step, so it never shows dots. It matters if one ever gains a build,
+   and only when the viewport is exactly 16:9 — at any other ratio the
+   dots sit on the letterbox rather than on the slide. */
+body:has(.slide.is-dark.current) #steps { --steps-ink: var(--ink-lit-dimmer); }
+
+body.overview #steps { display: none; }
+
+#progress {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  height: 3px;
+  background: transparent;
+  z-index: 40;
+}
+
+#progress-bar { height: 100%; width: 0; background: var(--accent-lit); }
+
+/* ---------------------------------------------------------- overview
+ *
+ * The map: every slide at once, in the shape the deck actually has.
+ * A column is a place in the talk and reads left to right; a column
+ * with more than one slide is a build and hangs downwards, so the two
+ * dimensions are visible rather than described. Columns wrap, because
+ * 43 of them in one line is 9,000 pixels and a map you have to scroll
+ * sideways through is not a map.
+ *
+ * `--ov` is the scale, set here and read by fit(), so the two cannot
+ * drift. Everything that must not shrink with the slide divides by it.
+ */
+
+:root { --ov: 0.125; }
+
+html.overview, body.overview { overflow: auto; height: auto; }
+
+/* The map is the navigation model drawn: a movement is a column and its
+   slides run down it, which is exactly what left/right and down/up do.
+   A map laid out the other way would teach the wrong gesture. */
+body.overview #deck {
+  position: static;
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 26px;
+  width: max-content;
+  min-height: 100%;
+  overflow: visible;
+}
+
+body.overview .group {
+  display: flex;
+  flex-direction: column;
+  gap: 30px 0;   /* a number above each slide, and a build's outline under the one before */
+}
+
+/* The number an id opens with, shown where it can be read. */
+body.overview .group-name::before {
+  content: attr(data-section) " ";
+  color: var(--ink-lit-dimmer);
+}
+
+body.overview .group:has(.stack.current-stack) .group-name::before { color: var(--accent); }
+
+/* The margin under the heading is the room the first stack's number
+   needs, now that it sits above the slide. */
+body.overview .group-name {
+  display: block;
+  margin: 0 0 22px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--hairline-deep);
+  font-family: var(--head);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--ink-lit-dim);
+}
+
+body.overview .group:has(.stack.current-stack) .group-name {
+  color: var(--accent-lit);
+  border-bottom-color: var(--accent);
+}
+
+body.overview .stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  outline: calc(1px / var(--ov)) solid transparent;
+}
+
+/* The number a slide carries is inside it, so at 0.16 it is a sixth of a
+   pixel tall and unreadable. The map gets its own, outside the scaled
+   box and therefore at its real size, and above the slide, where a label
+   is read before the thing it labels. */
+body.overview .stack::before {
+  content: attr(data-n);
+  position: absolute;
+  left: 2px;
+  top: -19px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--ink-lit-dim);
+}
+
+body.overview .stack.current-stack::before { color: var(--accent-lit); }
+
+body.overview .slide {
+  position: relative;
+  left: auto;
+  top: auto;
+  display: block;
+  transform-origin: top left;
+  cursor: pointer;
+  outline: calc(2px / var(--ov)) solid transparent;
+  outline-offset: calc(3px / var(--ov));
+}
+
+/* The outline is inside the scaled box, so it is scaled with it: at
+   0.16 a plain 2px rule lands at a third of a pixel and disappears.
+   Dividing by the scale is what makes it read as 2px on screen. */
+body.overview .slide.current { outline-color: var(--accent-lit); }
+
+/* One entry per slide, showing its final state. A slide that animates is
+   one slide, so it gets one thumbnail and that thumbnail is the last
+   step, which is the only one that shows everything the room ends up
+   seeing. The steps are still in the DOM and still checked by C; they
+   are just not separate things on a map of slides. */
+body.overview .stack .slide { display: none; }
+body.overview .stack .slide:last-child { display: block; }
+
+/* It still has to be findable as an animating slide, or the map makes 43
+   slides look like 43 identical ones. Slate, because teal is already
+   spoken for by "this is where you are". */
+body.overview .stack:has(.slide:nth-child(2)) {
+  outline: 2px solid var(--ink-lit-dim);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+
+body.overview .stack:has(.slide:nth-child(2))::after {
+  content: attr(data-steps) " steps";
+  position: absolute;
+  right: 2px;
+  top: -19px;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  color: var(--ink-lit-dim);
+}
+
+body.overview #progress,
+body.overview #compass { display: none; }
+
+/* ------------------------------------------------------- docked notes
+ *
+ * The notes docked beside the deck are an iframe on /presenter: the same
+ * page the detached window shows, so the two cannot drift apart. Both are
+ * off until asked for, because a panel that opened by itself would put
+ * the script on whatever screen the deck is being shared to.
+ */
+
+#dock {
+  display: none;
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--dock);
+  z-index: 46;
+  flex-direction: column;
+  background: var(--ground-deep);
+  border-left: 1px solid var(--hairline-deep);
+}
+
+body.docked #dock { display: flex; }
+
+#dock-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid var(--hairline-deep);
+  font-family: var(--head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--accent-lit);
+}
+
+#dock-bar span { margin-right: auto; }
+
+#dock-bar button {
+  padding: 4px 9px;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--ink-lit-dim);
+  background: none;
+  border: 1px solid var(--hairline-deep);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#dock-bar button:hover { color: var(--ink-lit); border-color: var(--hairline-deep-lit); }
+
+#dock-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  min-height: 0;
+}
+
+body.overview #dock { display: none; }
+
+/* The deck's chrome belongs to the deck, so it moves off the panel when
+   the notes dock beside it rather than sitting underneath it. The compass
+   was the visible half of this: the panel is painted over it, so the
+   arrows simply vanished the moment the notes were docked. The dots and
+   the progress bar had the quieter version of the same fault, one drifting
+   off the deck's centre and the other running its last third behind an
+   opaque panel, which reads as a talk that stops at two thirds. */
+body.docked #steps { left: calc((100% - var(--dock)) / 2); }
+body.docked #progress { right: var(--dock); }
+
+/* ----------------------------------------------------------- compass
+ *
+ * Four arrows, top right, lit only where there is somewhere to go. Left
+ * and right are the talk; down and up exist on the slides that are
+ * revealed in steps, and are dark everywhere else, so the deck says
+ * where a build is instead of leaving it to be discovered.
+ */
+
+#compass {
+  position: fixed;          /* left and top are set by fit(), from the slide's box */
+  z-index: 45;
+  display: grid;
+  grid-template-columns: repeat(3, 28px);
+  grid-template-rows: repeat(3, 28px);
+  --compass-ink: var(--ink-faint);
+}
+
+/* The slide's number, in the cell the four arrows leave empty. */
+.cnum {
+  grid-area: 2 / 2;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--compass-ink);
+}
+
+/* Fade carries the state, not colour: a direction you cannot go is the
+   same arrow at low opacity, which reads as unavailable on white and on
+   the dark slide alike and needs no second palette to stay legible. It
+   stays visible, because an arrow nobody can see is not saying "not that
+   way", it is saying nothing. */
+.cdir {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--compass-ink);
+  opacity: 0.25;
+  cursor: default;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.cdir svg { width: 20px; height: 20px; }
+
+.cdir svg path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.cdir-up    { grid-area: 1 / 2; }
+.cdir-left  { grid-area: 2 / 1; }
+.cdir-right { grid-area: 2 / 3; }
+.cdir-down  { grid-area: 3 / 2; }
+
+/* A direction you can go is lit in the talk's accent; the two that need
+   the deep-ground accent are the compass on the surround and over a dark
+   slide, the same two places the ink changes. */
+.cdir.live { opacity: 1; cursor: pointer; color: var(--accent); }
+#compass.outside .cdir.live,
+body:has(.slide.is-dark.current) #compass .cdir.live { color: var(--accent-lit); }
+
+/* The vertical pair moves between slides, not through a slide's steps, so
+   it carries no signal about animation: that is the dots' job. Colouring
+   it for a build would point at the wrong control. */
+
+/* On the surround, or over a dark slide, the ground is deep and only the
+   ink changes, because the fade already works either way. */
+#compass.outside,
+body:has(.slide.is-dark.current) #compass { --compass-ink: var(--ink-lit-faint); }
+
+/* ------------------------------------------------------- the reset ask
+ *
+ * A strip rather than a dialog: it has to be readable from the back of a
+ * room and must not take the keyboard away from the deck.
+ */
+
+#ask {
+  display: none;
+  position: fixed;
+  left: 50%;
+  bottom: 34px;
+  transform: translateX(-50%);
+  z-index: 65;
+  padding: 12px 22px;
+  border-radius: 6px;
+  background: var(--ground-deep);
+  color: var(--ink-lit-body);
+  font-size: 15px;
+  line-height: 1.4;
+  box-shadow: 0 6px 26px rgba(15, 23, 42, 0.3);
+}
+
+body.asking #ask { display: block; }
+body.asked #ask { color: var(--accent-lit); }
+
+/* -------------------------------------------------------------- help */
+
+#help {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(15, 23, 42, 0.94);
+  color: var(--ink-lit-soft);
+  place-items: center;
+}
+
+body.help #help { display: grid; }
+#help dl { font-size: 18px; display: grid; grid-template-columns: auto 1fr; gap: 12px 26px; }
+#help dt { font-family: var(--mono); color: var(--accent-lit); }
+#help dd { margin: 0; }
+
+@media print { body { overflow: visible; } .slide { display: block; page-break-after: always; } }
+
+/* --------------------------------------------------------- the check */
+
+#audit {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  padding: 8vh 10vw;
+  background: rgba(15, 23, 42, 0.96);
+  color: var(--ink-lit-soft);
+  overflow-y: auto;
+}
+
+body.audit #audit { display: block; }
+#audit h4 { font-family: var(--head); font-size: 26px; color: var(--ink-lit); margin: 0 0 18px; }
+#audit ul { margin: 0 0 18px; padding-left: 20px; }
+#audit li { font-size: 17px; line-height: 1.7; }
+#audit li b { color: var(--accent-lit); font-variant-numeric: tabular-nums; }
+#audit p { font-size: 15px; color: var(--ink-lit-dim); }

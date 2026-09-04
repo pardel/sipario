@@ -1,0 +1,56 @@
+.slide.template-statement .stage { justify-content: center; }
+
+/* `pretty`, not `balance`. Both clear a stranded last word, but balance
+   evens every line and re-breaks the ones that were already right: it
+   turned the opening statement into "Every second-brain / system solves
+   capture.", splitting a compound noun to fix a slide that was not
+   wrong. `pretty` leaves a good break alone and only refuses to leave a
+   word on its own, which is the actual defect: "has commit rights to
+   your / memory." and "and they split along the same / line." */
+
+p.statement-line {
+  font-family: var(--head);
+  text-wrap: pretty;
+  font-size: 46px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.4px;
+  color: var(--ink);
+  max-width: 24ch;
+}
+
+/* Same ink, same size, same weight as the line below it. The pair has to
+   read as a build rather than as a replacement, which is exactly what
+   fading the carried line destroys: the room sees the first line being
+   withdrawn instead of being added to. */
+
+p.statement-carry {
+  font-family: var(--head);
+  text-wrap: pretty;
+  font-size: 46px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.4px;
+  color: var(--ink);
+  max-width: 24ch;
+  margin-bottom: 22px;
+}
+
+.slide.template-statement.is-dark { background: var(--ground-deep); }
+
+.slide.template-statement.is-dark p.statement-line,
+.slide.template-statement.is-dark p.statement-carry { color: var(--ink-lit); }
+
+.slide.template-statement.is-dark .rule { background: var(--accent-lit); }
+
+.slide.template-statement.is-dark { background-image: none; }
+
+/* A title, when the slide has one: a label above the rule, in the
+   standfirst's ink, never competing with the line. */
+
+.statement-title {
+  font-family: var(--head);
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--ink-faint);
+}

@@ -1,0 +1,13 @@
+{{! A figure, whole or revealed a layer at a time.
+
+    Without layers it is an <img>, right for a picture that arrives whole.
+    With layers it has to be inlined: an <img> is an opaque document and
+    nothing outside it can hide a group inside it. The caption is the last
+    reveal, so the picture is read before it is told what to make of it. }}
+
+<h2>{{meta.title|br}}</h2>
+<hr class="rule">
+
+{{^layered}}<img class="image-figure" src="{{imagePath|raw}}/{{meta.figure}}.svg" alt="{{meta.title}}">{{/layered}}{{#layered}}<figure class="image-figure">{{svg|raw}}</figure>{{/layered}}
+
+{{#meta.caption}}<p class="image-caption{{captionCls|raw}}">{{meta.caption|inline}}</p>{{/meta.caption}}

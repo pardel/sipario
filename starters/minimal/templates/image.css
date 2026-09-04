@@ -1,0 +1,25 @@
+.image-figure {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  object-fit: contain;
+  object-position: left center;
+}
+
+/* A layered figure is inlined rather than loaded as an image, because
+   nothing outside an <img> can hide a group inside it. The wrapper takes
+   the box the <img> had and the svg fits itself into it, so a figure that
+   gains a build does not also change size or position. */
+
+figure.image-figure {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+figure.image-figure > svg {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+}

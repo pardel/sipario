@@ -1,0 +1,10 @@
+/* The rows are separated by the newlines already in the block, so the
+   spans stay inline: made blocks, each would take a line of its own and
+   the newline beside it would take a second, double-spacing the listing.
+   The note is pushed to a column rather than left where the file put it,
+   so the paths read as one column and the notes as another; without that
+   the listing wanders with the length of each path. */
+
+.tree-path { display: inline-block; min-width: 26ch; }
+
+.tree-note { color: var(--code-aside); }

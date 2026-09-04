@@ -1,0 +1,7 @@
+{{! An ink, a name, a gloss. The ink is a palette token, so restyling
+    the talk restyles these with it. }}
+
+<h2>{{meta.title|br}}</h2>
+<hr class="rule">
+
+{{#rows join="\n"}}<div class="labels-row"><code class="labels-label" style="--label:{{ink}}">{{name}}</code><p>{{gloss|inline}}</p></div>{{/rows}}

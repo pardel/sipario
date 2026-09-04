@@ -1,0 +1,59 @@
+/* Two columns, as the .pptx had them: the acrostic letter alone on the
+   left at the size of a whole word, and the word, its rule and the
+   description stacked beside it. Geometry converted from that deck's
+   inches at 96dpi — letter column to 4.7in, letter 190pt, word 44pt,
+   rule 1.4in, description 21pt — rather than re-guessed. */
+
+.slide.template-section { background: var(--ground-sunk); }
+
+.slide.template-section .stage {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  align-items: center;
+  align-content: center;
+  column-gap: 36px;
+}
+
+.section-mark {
+  font-family: var(--head);
+  font-size: 253px;
+  font-weight: 700;
+  line-height: 0.95;
+  color: var(--accent);
+}
+
+/* No max-width: the grid's 1fr is 752px here, which is the 7.9in the
+   .pptx gave this column. Narrowing it wrapped lines the original
+   fit on one. */
+
+.section-body { min-width: 0; }
+
+.slide.template-section h2 { font-size: 59px; }
+
+.slide.template-section .rule { width: 134px; margin: 20px 0 22px; }
+
+.section-line { font-size: 28px; line-height: 1.35; color: var(--ink-body); }
+
+.slide.template-section {
+  background-image: url('../images/bg-grid.svg');
+  background-position: 0 0;
+  background-size: var(--w) var(--h);
+  background-repeat: no-repeat;
+}
+
+/* What the movement holds, under the line: numbered by the list itself,
+   in two columns so nine rows sit beside the letter rather than below
+   it. */
+
+.section-list {
+  list-style: decimal inside;
+  margin: 18px 0 0;
+  padding: 0;
+  columns: 2;
+  column-gap: 36px;
+  font-size: 20px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+}
+
+.section-item { break-inside: avoid; }

@@ -1,0 +1,260 @@
+/* This talk's look: the locandina.
+
+   sipario is the curtain, so the example is set like the bill outside an
+   Italian theatre: a serif with real italics, printed in black and
+   curtain-red on white paper, with the size of a line saying how much it
+   matters and nothing else saying anything. Rows are a cast
+   list, two columns meeting at a gutter down the middle. The act break
+   is the one slide that goes on the curtain itself. Off the paper, the
+   surround and the deck's chrome are the house: velvet, and one gold
+   line for the progress bar.
+
+   css/theme.css is the frame and knows nothing about what a slide
+   contains. This file loads after it, so anything the frame sets can be
+   replaced here — the palette and the family tokens included. The
+   template sheets load after this one, so a template can override a
+   shared rule for its own slides. What one template alone puts on a
+   slide is beside it, in templates/<name>.css.
+*/
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url('fonts/newsreader.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: italic;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url('fonts/newsreader-italic.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Courier Prime';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('fonts/courier-prime.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Courier Prime';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('fonts/courier-prime-bold.woff2') format('woff2');
+}
+
+:root {
+  /* One family for everything set in type, in both its voices: roman for
+     what is said, italic for the stage direction. Newsreader was drawn
+     for reading on a screen and carries an optical-size axis, so a line
+     of body text keeps sturdy strokes while a title gets the contrast a
+     bill wants; Bodoni was here first and its hairlines did not survive
+     a projector. The mono face is the typewriter the script came off. */
+  --head: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --body: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --mono: 'Courier Prime', Courier, 'Courier New', monospace;
+
+  /* The paper. */
+  --ground:            #ffffff;
+  --ground-sunk:       #f2f1ee;   /* a slip of typescript laid on the page */
+
+  /* The house: the surround and the panels. The slide that is the
+     curtain itself takes the panel shade, a step lighter than the
+     surround, so it still reads as a slide on the map and in a
+     letterbox. */
+  --ground-deep:       #3b0812;
+  --ground-panel:      #4d0c18;
+
+  /* Ink on the paper: black, not a tinted near-black. Letterpress is. */
+  --ink:               #000000;
+  --ink-body:          #161616;
+  --ink-soft:          #3c3c3c;
+  --ink-faint:         #6f6f6f;
+
+  /* Ink on the velvet: paper, warmed a touch so it reads as lit. */
+  --ink-lit:           #fdf8ee;
+  --ink-lit-body:      #f3ead9;
+  --ink-lit-soft:      #e5d6bc;
+  --ink-lit-faint:     #cdb894;
+  --ink-lit-dim:       #a58b68;
+  --ink-lit-dimmer:    #75503f;
+
+  /* The second colour on the paper is the curtain's. The gold is for the
+     house only: the progress bar and the step dots, never a slide. */
+  --accent:            #b3121f;
+  --accent-lit:        #d9b25c;
+
+  --hairline:          #dcdcdc;
+  --hairline-deep:     #5c1c27;
+  --hairline-deep-lit: #8b3a46;
+
+  /* Typescript is set on the paper, not in a dark well. A diff is
+     corrected the way a proof is: what goes is struck through in pencil,
+     what comes is written in red. */
+  --code-ground:       var(--ground-sunk);
+  --code-ink:          #000000;
+  --code-added:        #b3121f;
+  --code-removed:      #8a8a8a;
+  --code-aside:        #6f6f6f;
+
+  /* Four label inks in a two-colour print: set, pencilled, red, and the
+     ochre of a note in the margin. */
+  --label-good:        #000000;
+  --label-quiet:       #8a8a8a;
+  --label-bad:         #b3121f;
+  --label-note:        #9a7420;
+}
+
+/* The one slide on the curtain. Every rule below reaches for the paper
+   tokens, so the dark slide flips them once here and nothing else needs
+   a second rule. Red dies on crimson, so the accent becomes paper too. */
+
+.slide.is-dark {
+  background: var(--ground-panel);
+  --ink:       var(--ink-lit);
+  --ink-body:  var(--ink-lit-body);
+  --ink-soft:  var(--ink-lit-soft);
+  --ink-faint: var(--ink-lit-faint);
+  --accent:    var(--ink-lit);
+  --hairline:  var(--hairline-deep);
+}
+
+
+/* --------------------------------------------------------------- type
+ *
+ * The bill's hierarchy is size alone: no weight change, no colour
+ * change, no chrome. Headings are centred because everything on a bill
+ * is, and the text is set at a measure a room can read.
+ */
+
+h1, h2, h3 {
+  font-family: var(--head);
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0;
+}
+
+h1 {
+  font-size: 88px;
+  line-height: 1.02;
+  letter-spacing: -0.01em;
+  text-align: center;
+  text-wrap: balance;
+}
+
+h2 {
+  font-size: 50px;
+  line-height: 1.08;
+  text-align: center;
+  text-wrap: balance;
+  max-width: 24ch;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+h3 { font-size: 26px; line-height: 1.25; }
+
+p { margin: 0; line-height: 1.4; }
+
+/* The theatre's name at the head of the bill. The deck writes it in
+   capitals; the tracking is what capitals in a serif need. */
+
+.title-kicker, .acrostic-kicker {
+  font-family: var(--head);
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  color: var(--accent);
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+/* The swelled rule, which is the one ornament a printer of bills allowed
+   himself: a line that thickens at its middle and tapers to nothing.
+   Cut from a solid with an ellipse rather than drawn, so it takes the
+   accent token and turns to paper on the curtain with everything else. */
+
+.rule {
+  width: 200px;
+  height: 7px;
+  border: 0;
+  margin: 24px auto;
+  background: var(--accent);
+  clip-path: ellipse(50% 50% at 50% 50%);
+}
+
+.rule.wide { width: 320px; }
+
+/* The standfirst under a heading is the stage direction: italic, quieter
+   than the line it follows, and set to a measure that balances. */
+
+.icon-list-sub, .close-sub {
+  font-style: italic;
+  font-size: 24px;
+  line-height: 1.35;
+  color: var(--ink-soft);
+  text-align: center;
+  max-width: 50ch;
+  margin: 0 auto 20px;
+  text-wrap: balance;
+}
+
+.slide.align-tight .rule { margin-bottom: 16px; }
+
+/* ---------------------------------------------------------- typescript
+ *
+ * A terminal, a diff, a listing and a file all set what is actually on
+ * disk, so they share the typewriter face on a slip of typescript laid
+ * on the page. The slip is as wide as its lines and centred, the way a
+ * clipping pasted into a prompt book sits.
+ */
+
+.diff-path, .file-path {
+  font-family: var(--mono);
+  font-size: 17px;
+  color: var(--ink-faint);
+  text-align: center;
+  margin: 0 0 10px;
+}
+
+pre.diff-block, pre.tree-block, pre.file-block, pre.term-block {
+  font-family: var(--mono);
+  font-size: 19px;
+  line-height: 1.5;
+  color: var(--code-ink);
+  background: var(--code-ground);
+  padding: 28px 40px;
+  margin: 0;
+  min-width: 56ch;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: pre;
+}
+
+.image-caption, .term-caption {
+  font-style: italic;
+  font-size: 21px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+  text-align: center;
+  max-width: 60ch;
+  margin: 22px auto 0;
+  text-wrap: pretty;
+}
+
+.diff-caption, .tree-caption, .file-caption {
+  font-style: italic;
+  font-size: 21px;
+  line-height: 1.4;
+  color: var(--ink-soft);
+  text-align: center;
+  max-width: 60ch;
+  margin: 22px auto 0;
+  text-wrap: pretty;
+}

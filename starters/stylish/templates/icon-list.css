@@ -1,0 +1,103 @@
+/* The cast list. Each row is a part and the person who plays it: the
+   heading right-aligned to the gutter, the line left-aligned from it,
+   and the icon standing in the gutter where a bill would put a fleuron.
+   The text wrapper is dissolved with `display: contents` so the heading
+   and the line are the grid's own children and can sit either side. */
+
+.icon-list-row {
+  display: grid;
+  grid-template-columns: 1fr 26px 1fr;
+  column-gap: 26px;
+  align-items: start;
+  padding: 13px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+/* The rows are long enough to need the eye carried across the gutter,
+   which is what the hairline is for; the first has nothing above it. */
+
+.icon-list-row.first { border-top: 0; }
+
+.icon-list-row-text { display: contents; }
+
+/* Every cell names its row as well as its column. The icon comes first
+   in the markup and takes column 2, and sparse auto-placement then puts
+   a heading asking for column 1 on the row below rather than behind the
+   cursor; the three have to be told they share one row. */
+
+.icon-list-row h3 {
+  grid-column: 1;
+  grid-row: 1;
+  text-align: right;
+  text-wrap: balance;
+}
+
+/* Start of the row, then down into the heading's x-height, so the icon
+   sits beside the words like a glyph. */
+
+.icon-list-ico {
+  grid-column: 2;
+  grid-row: 1;
+  width: 24px;
+  height: 24px;
+  align-self: start;
+  justify-self: center;
+  margin-top: 6px;
+}
+
+/* The three sit on the row's top edge and are brought to one baseline
+   by hand: the heading's first baseline is 4px lower than the body's at
+   these sizes, so the body is padded down to meet it. */
+
+.icon-list-row-text p {
+  grid-column: 3;
+  grid-row: 1;
+  padding-top: 4px;
+  font-size: 20px;
+  color: var(--ink-body);
+  max-width: 44ch;
+  text-wrap: pretty;
+}
+
+/* A line of its own among the rows is a stage direction, centred. */
+
+.icon-list-lead {
+  font-style: italic;
+  font-size: 22px;
+  color: var(--ink-soft);
+  text-align: center;
+  max-width: 50ch;
+  margin: 0 auto 14px;
+  text-wrap: balance;
+}
+
+/* A standfirst that changes as the slide builds. The ghost is the
+   longest wording, invisible, there only to hold the height so the rows
+   below never move; the live copy sits over it. */
+
+.icon-list-sub-box { position: relative; }
+
+.icon-list-sub-box .ghost { visibility: hidden; }
+
+.icon-list-sub-box .over { position: absolute; top: 0; left: 0; right: 0; }
+
+/* `align:` in a slide's front matter says what to do with the room left
+   under the heading: `bottom` drops the rows to the foot, `spread`
+   splits the room evenly above and below them, `tight` closes the rows
+   for a list that has outgrown the rhythm. Hidden rows take part too,
+   which is what keeps a build from moving as it runs. */
+
+.slide.align-bottom .icon-list-row.first,
+.slide.align-bottom .icon-list-lead.first { margin-top: auto; }
+
+.slide.align-bottom .icon-list-row.last { margin-bottom: 22px; }
+
+.slide.align-tight .icon-list-row { padding: 8px 0; }
+
+.slide.align-tight .icon-list-sub { margin-bottom: 12px; }
+
+.slide.align-spread .icon-list-row { padding: 18px 0; }
+
+.slide.align-spread .icon-list-row.first { margin-top: auto; }
+
+.slide.align-spread .icon-list-row.last { margin-bottom: auto; }

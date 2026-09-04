@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 200" preserveAspectRatio="xMinYMid meet"
+     font-family="Inter, system-ui, sans-serif" font-size="15">
+  <rect x="8" y="60" width="130" height="72" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="73" y="101" text-anchor="middle" fill="#334155">deck.md</text>
+  <path d="M146 96h60" stroke="#94a3b8" stroke-width="2" marker-end="url(#a)"/>
+  <rect x="214" y="60" width="130" height="72" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <text x="279" y="101" text-anchor="middle" fill="#334155">templates/</text>
+  <path d="M352 96h60" stroke="#94a3b8" stroke-width="2" marker-end="url(#a)"/>
+  <rect x="420" y="60" width="52" height="72" rx="8" fill="#f0fdfa" stroke="#14b8a6"/>
+  <text x="446" y="101" text-anchor="middle" fill="#0d9488">HTML</text>
+  <defs><marker id="a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+    <path d="M0 0 8 4 0 8z" fill="#94a3b8"/></marker></defs>
+</svg>

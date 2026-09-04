@@ -1,0 +1,14 @@
+{{! A real diff, set the way the tool prints it.
+
+    The point of the slide is that the correction is visible and small,
+    so the lines are set in the mono face at the size a terminal uses
+    and nothing is summarised. `file:` names what is being diffed. }}
+
+<h2>{{meta.title|br}}</h2>
+<hr class="rule">
+
+{{#meta.file}}<p class="diff-path">{{meta.file}}</p>{{/meta.file}}
+
+<pre class="diff-block">{{#lines join="\n"}}<span class="diff-{{kind}}">{{text}}</span>{{/lines}}</pre>
+
+{{#meta.caption}}<p class="diff-caption">{{meta.caption|inline}}</p>{{/meta.caption}}

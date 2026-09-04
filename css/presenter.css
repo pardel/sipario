@@ -1,0 +1,208 @@
+/* The presenter window.
+ *
+ * It loads the deck's own stylesheet first, so the previews below are the
+ * real slides at a smaller size rather than a second rendering of them.
+ * Everything here is the chrome around those.
+ */
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--ground-deep);
+  color: var(--ink-lit-soft);
+  font-family: var(--body);
+  overflow: hidden;
+}
+
+#deck { display: none; }              /* the source the previews clone from */
+
+/* Two columns at every width, so the notes are the same arrangement
+   whether they are docked beside the deck or in a window of their own.
+   There used to be a breakpoint at 820px that stacked them into one
+   column, which meant the docked panel and the detached window were the
+   same page wearing two different layouts.
+   
+   The rail is proportional rather than a fixed 300px: fixed, it took
+   two thirds of a 435px dock and left the preview 115px wide. */
+#wrap {
+  display: grid;
+  grid-template-columns: 1fr minmax(150px, 300px);
+  grid-template-rows: auto 1fr;
+  gap: 18px;
+  height: 100%;
+  padding: 18px;
+  box-sizing: border-box;
+}
+
+.pane { min-width: 0; }
+
+h4 {
+  font-family: var(--head);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--accent-lit);
+  margin: 0 0 8px;
+}
+
+/* ---- the two previews: the real slide, cloned and scaled ------------- */
+
+.shot-box {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--ground);
+  outline: 1px solid var(--hairline-deep);
+}
+
+.shot-box.empty { background: var(--ground-panel); height: 92px; }
+
+.slide.shot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  transform-origin: top left;
+  margin: 0;
+}
+
+#next-label {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--ink-lit-dim);
+}
+
+/* ---- the side column ------------------------------------------------- */
+
+#side { display: flex; flex-direction: column; gap: 18px; }
+
+#attach-row { display: flex; align-items: center; gap: 10px; }
+
+#attach-btn {
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-lit-faint);
+  background: none;
+  border: 1px solid var(--hairline-deep);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#attach-btn:hover { color: var(--ink-lit); border-color: var(--accent); }
+#attach-note { font-size: 11px; color: var(--accent-lit); }
+
+#clock {
+  font-family: var(--mono);
+  font-size: 40px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-lit);
+  line-height: 1;
+}
+
+#clock.running { color: var(--accent-lit); }
+
+#timer-btn {
+  margin-top: 8px;
+  padding: 5px 11px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-lit-faint);
+  background: none;
+  border: 1px solid var(--hairline-deep);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#timer-btn:hover { color: var(--ink-lit); border-color: var(--hairline-deep-lit); }
+
+#timer-note { margin: 6px 0 0; font-size: 11px; color: var(--accent-lit); }
+#timer-note.asking { color: var(--ink-lit); }
+#timer-note:empty { display: none; }
+
+#group {
+  font-family: var(--head);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink-lit);
+  margin-bottom: 3px;
+}
+
+#where {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-lit-dim);
+}
+
+#dots { display: flex; gap: 6px; margin-top: 8px; }
+
+#dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--ink-lit-dimmer);
+}
+
+#dots span.on { background: var(--accent-lit); box-shadow: none; }
+
+/* ---- the script, which is what this window is for -------------------- */
+
+#script {
+  grid-column: 1 / -1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+#notes p {
+  font-size: 19px;
+  line-height: 1.6;
+  margin: 0 0 14px;
+  color: var(--ink-lit-body);
+  max-width: 76ch;
+}
+
+#notes p.cue { color: var(--accent-lit); font-style: italic; }
+
+/* Emphasis has to carry from across a room at a glance, so bold goes
+   brighter as well as heavier: weight alone is easy to miss on a dark
+   panel read peripherally. */
+#notes strong { font-weight: 700; color: var(--ink-lit); }
+#notes em { font-style: italic; }
+
+/* Same measure and rhythm as the prose around them: a list in the script
+   is a way of reading one sentence faster, not a different voice. */
+#notes ul,
+#notes ol {
+  font-size: 19px;
+  line-height: 1.6;
+  margin: 0 0 14px;
+  padding-left: 1.1em;
+  color: var(--ink-lit-body);
+  max-width: 76ch;
+}
+
+#notes li { margin: 0 0 4px; }
+#notes li::marker { color: var(--accent-lit); }
+
+/* ---- when the deck window is not there ------------------------------- */
+
+#orphan {
+  display: none;
+  position: fixed;
+  inset: 0;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.96);
+  text-align: center;
+  padding: 8vh 10vw;
+  z-index: 10;
+}
+
+body.orphan:not(.live) #orphan { display: grid; }
+#orphan strong { display: block; font-family: var(--head); font-size: 20px; color: var(--ink-lit); }
+#orphan span { display: block; margin-top: 10px; font-size: 15px; color: var(--ink-lit-dim); }
+
+

@@ -1,0 +1,13 @@
+{{! The word, where to find the thing, and the colophon. }}
+
+<hr class="rule wide">
+
+<h1 class="close-word">{{meta.title}}</h1>
+{{#sub}}<p class="close-sub">{{sub|inline}}</p>{{/sub}}
+
+<div class="close-links">
+  {{#pairs join="\n"}}<p class="close-link">{{lead}}</p>{{#note}}
+  <p class="close-link-note">{{note}}</p>{{/note}}{{/pairs}}
+</div>
+
+<p class="close-colophon">{{colophon|raw}}</p>

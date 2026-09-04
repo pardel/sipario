@@ -1,0 +1,6 @@
+/* The file's path is chrome on the sheet, not a caption under it: it says
+   the lines below were read off disk, so it has to be attached to them. */
+
+.file-sheet { display: flex; flex-direction: column; }
+
+.file-path { margin: 0 0 8px; }

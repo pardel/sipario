@@ -1,0 +1,5 @@
+.diff-add { color: var(--code-added); }
+
+.diff-del { color: var(--code-removed); }
+
+.diff-same { color: var(--code-ink); }

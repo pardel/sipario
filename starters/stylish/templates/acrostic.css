@@ -1,0 +1,35 @@
+/* The letters run down the middle of the page rather than the side: the
+   letter is right-aligned to the word, the word holds the centre column,
+   and the gloss runs left from it. Each row is a grid of its own, so the
+   word column is a fixed width rather than `auto`: sized to its own row,
+   it put every initial at a different place, and the spine is the point. */
+
+.acrostic-row {
+  display: grid;
+  grid-template-columns: 1fr 160px 1fr;
+  column-gap: 22px;
+  align-items: baseline;
+  padding: 12px 0;
+}
+
+.acrostic-letter {
+  font-family: var(--head);
+  font-size: 44px;
+  font-weight: 700;
+  color: var(--accent);
+  text-align: right;
+}
+
+.acrostic-word {
+  font-family: var(--head);
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.acrostic-gloss {
+  font-size: 20px;
+  color: var(--ink-body);
+  max-width: 40ch;
+  text-wrap: pretty;
+}

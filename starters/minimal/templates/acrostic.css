@@ -1,0 +1,27 @@
+.acrostic-row {
+  display: flex;
+  align-items: baseline;
+  gap: 24px;
+  padding: 12px 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.acrostic-row:first-of-type { border-top: 0; }
+
+.acrostic-letter {
+  font-family: var(--head);
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--accent);
+  flex: 0 0 1.2ch;
+}
+
+.acrostic-word {
+  font-family: var(--head);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ink);
+  flex: 0 0 22ch;
+}
+
+.acrostic-gloss { font-size: 17px; color: var(--ink-faint); }

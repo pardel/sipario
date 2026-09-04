@@ -1,0 +1,7 @@
+/* The slip is as wide as what printed and no wider; the stage centres
+   it. The block's own rules are shared with the diff, the listing and the
+   file, in deck.css. */
+
+.slide.template-term .stage { align-items: center; }
+
+pre.term-block { min-width: 60ch; }

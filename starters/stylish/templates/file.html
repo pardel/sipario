@@ -1,0 +1,15 @@
+{{! A file, as it is on disk, under its path.
+
+    The path is the whole credibility of the slide: it says the words
+    above it were not written for the slide. `term` prints a session,
+    which is a different thing and reads differently. }}
+
+<h2>{{meta.title|br}}</h2>
+<hr class="rule">
+
+<div class="file-sheet">
+  <p class="file-path">{{meta.file}}</p>
+  <pre class="file-block">{{fenced}}</pre>
+</div>
+
+{{#meta.caption}}<p class="file-caption">{{meta.caption|inline}}</p>{{/meta.caption}}

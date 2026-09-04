@@ -1,0 +1,12 @@
+pre.term-block {
+  font-family: var(--mono);
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--code-ink);
+  background: var(--code-ground);
+  border-radius: 8px;
+  padding: 24px 26px;
+  margin: 0;
+  overflow: hidden;
+  white-space: pre;
+}

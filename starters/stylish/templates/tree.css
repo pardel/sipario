@@ -1,0 +1,11 @@
+.slide.template-tree .stage { align-items: center; }
+
+/* The rows are separated by the newlines already in the block, so the
+   spans stay inline: made blocks, each would take a line of its own and
+   the newline beside it a second, double-spacing the listing. The note is
+   pushed to a column so the paths read as one column and the notes as
+   another. */
+
+.tree-path { display: inline-block; min-width: 24ch; }
+
+.tree-note { color: var(--code-aside); }

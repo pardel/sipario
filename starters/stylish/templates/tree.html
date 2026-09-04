@@ -1,0 +1,11 @@
+{{! A directory listing, with a note against the rows that need one.
+
+    A drawn diagram of a folder structure is a picture of something the
+    room already knows how to read. This is the listing itself. }}
+
+<h2>{{meta.title|br}}</h2>
+<hr class="rule">
+
+<pre class="tree-block">{{#rows join="\n"}}<span class="tree-path">{{path}}</span>{{#note}}<span class="tree-note">{{note}}</span>{{/note}}{{/rows}}</pre>
+
+{{#meta.caption}}<p class="tree-caption">{{meta.caption|inline}}</p>{{/meta.caption}}

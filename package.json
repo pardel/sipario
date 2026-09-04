@@ -1,0 +1,41 @@
+{
+  "name": "sipario",
+  "version": "0.1.1",
+  "description": "A markdown deck, rendered: the format, the renderer and its checks, the deck runtime, the presenter window and a server that renders per request. Ships no templates and no design — those belong to the talk.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pardel/sipario.git"
+  },
+  "homepage": "https://github.com/pardel/sipario#readme",
+  "bugs": {
+    "url": "https://github.com/pardel/sipario/issues"
+  },
+  "main": "index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "sipario": "bin/sipario.js",
+    "sipario-serve": "bin/sipario-serve.js",
+    "sipario-renumber": "bin/sipario-renumber.js"
+  },
+  "files": [
+    "index.js",
+    "CHANGELOG.md",
+    "lib/",
+    "bin/",
+    "css/",
+    "js/",
+    "docs/",
+    "starters/"
+  ],
+  "scripts": {
+    "test": "node test.js",
+    "minimal": "node bin/sipario.js serve starters/minimal",
+    "stylish": "node bin/sipario.js serve starters/stylish"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  }
+}

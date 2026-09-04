@@ -1,0 +1,18 @@
+{{! One line, or a few arriving one at a time.
+
+    Every paragraph but the last is a line the room has already been
+    given; the last is the one landing now. They are set identically,
+    because the pair has to read as a build rather than a swap.
+
+    Lines the step has not reached are rendered and hidden, never left
+    out: leaving one out re-centres the stage and the line being read
+    jumps as the next one lands.
+
+    A statement usually has no title; when the `##` line carries one it
+    is set small above the rule, a label rather than a heading. }}
+
+{{#meta.title}}<p class="statement-title">{{meta.title|br}}</p>{{/meta.title}}
+
+<hr class="rule wide">
+
+{{#lines join="\n"}}<p class="{{cls}}" data-heading>{{text|br}}</p>{{/lines}}

@@ -1,0 +1,47 @@
+/* The last page of the bill: the word, the direction, and where to find
+   the thing as a cast list, the paths in the typewriter face against the
+   gutter. The colophon sits on the foot of the page, outside the centred
+   group, so it stays at the bottom without dragging the rest to the top. */
+
+.slide.template-close .stage {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+.close-word { font-size: 96px; }
+
+.close-links {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 30px;
+  row-gap: 14px;
+  align-items: baseline;
+  width: 100%;
+  margin-top: 30px;
+  text-align: left;
+}
+
+.close-link {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent);
+  text-align: right;
+}
+
+.close-link-note {
+  font-size: 20px;
+  color: var(--ink-body);
+  max-width: 40ch;
+  text-wrap: pretty;
+}
+
+.close-colophon {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  font-size: 16px;
+  color: var(--ink-faint);
+}

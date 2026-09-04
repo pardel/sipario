@@ -1,0 +1,30 @@
+/* A cast list of signals: the name in the typewriter face, right-aligned
+   to the gutter in its own ink, and what it means running left from it. */
+
+.labels-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 30px;
+  align-items: baseline;
+  padding: 14px 0;
+}
+
+.labels-label {
+  font-family: var(--mono);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--label);
+  text-align: right;
+}
+
+.labels-row p {
+  font-size: 21px;
+  color: var(--ink-body);
+  max-width: 42ch;
+  text-wrap: pretty;
+}
+
+/* `align: tight` closes the rows for a list that has outgrown the
+   rhythm, as it does for an icon list. */
+
+.slide.align-tight .labels-row { padding: 4px 0; }
