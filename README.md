@@ -45,6 +45,11 @@ bill outside an Italian theatre, and shows that a look lives entirely in
 a talk's `deck.css` and `templates/`. Copy it instead if you want to
 start from that one.
 
+The same slide in each, a diff with the change coloured:
+
+<img src="shots/minimal-3.8.png" width="49%" alt="The diff slide in the minimal starter: a heading in Raleway over a teal rule, the diff in a dark block with the removed line in red and the added line in green, and the minimap and compass in the corners.">
+<img src="shots/stylish-3.8.png" width="49%" alt="The same slide in the stylish starter: the heading centred in Newsreader over a swelled red rule, the diff on a paper slip with the removed line struck through and the added line in red, and an italic caption under it.">
+
 Both commands default their folder to `./talk`, so the pair above needs
 nothing typed between them; give either one a folder and it uses that
 instead.
