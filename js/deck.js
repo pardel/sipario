@@ -361,9 +361,25 @@
     if (to) { g = to.g; s = to.s; y = 0; show(); } else { jump(slides.indexOf(el)); }
   }
 
+  /* Where the deck was at the last show, so the next one knows which way
+   * it moved: a different movement is left or right, a different slide
+   * within one is down or up, and the same slide is a step, which must
+   * not move because a build's whole point is that nothing shifts. The
+   * arriving slide carries the direction and the stylesheet does the
+   * rest. */
+  var shown = null;
+
   function show() {
     marks[g] = { s: s, y: y };
     var here = at();
+    var from = shown;
+    shown = { g: g, s: s };
+    var enter = "";
+    if (from && (from.g !== g || from.s !== s)) {
+      enter = from.g !== g ? (g > from.g ? "right" : "left") : (s > from.s ? "down" : "up");
+    }
+    if (enter) here.setAttribute("data-enter", enter);
+    else here.removeAttribute("data-enter");
     slides.forEach(function (el) { el.classList.toggle("current", el === here); });
     /* Progress runs over steps, so every press of space moves it. */
     bar.style.width = ((index() + 1) / slides.length * 100) + "%";

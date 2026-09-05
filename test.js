@@ -268,6 +268,32 @@ check('the compass sits by the slide\'s bottom-right corner, outside it when the
   window.dispatchEvent(new window.Event('resize'));
 });
 
+check('a slide arrives from the direction it was reached, and a step does not move', () => {
+  /* The direction rides on the arriving slide as data-enter and the
+     stylesheet animates the stage from that side. Movements are left and
+     right, slides within one are down and up, and a step within a build
+     carries nothing, because a build must not shift. */
+  const { current, key, forget } = MOVES;
+  forget();
+  key('ArrowRight');
+  eq(current().dataset.enter, 'right', 'the next movement comes from the right');
+  key('ArrowDown');
+  eq(current().dataset.enter, 'down', 'the next slide comes from below');
+  key('ArrowDown');
+  eq(current().dataset.n, '2.2', 'still on the build');
+  eq(current().dataset.enter, undefined, 'its next step does not move');
+  key('ArrowLeft');
+  eq(current().dataset.enter, 'left', 'the previous movement comes from the left');
+  key('End');
+  eq(current().dataset.enter, 'right', 'a jump forward comes from the right');
+  key('Home');
+  eq(current().dataset.enter, 'left', 'and a jump back from the left');
+  const rules = css.match(/\.slide\[data-enter="(right|left|down|up)"\]\s+\.stage \{[^}]*animation:/g) || [];
+  eq(rules.length, 4, 'the frame animates all four directions');
+  eq(/prefers-reduced-motion: reduce\)\s*\{\s*\.slide\[data-enter\] \.stage \{\s*animation: none/.test(css), true,
+     'and none of them for someone who asked for less motion');
+});
+
 check('the compass lights only the live directions', () => {
   const { window, doc, current, key, forget } = MOVES;
   /* Left and right are the movements; down and up are the slides inside
