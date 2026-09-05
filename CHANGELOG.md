@@ -4,9 +4,7 @@ Newest first, one line per thing somebody using sipario would notice.
 Every break is stated as a break: before 1.0 there is no major to spend,
 so a break ships as a minor and this file is the whole of the warning.
 
-## 0.2.0
-
-Unreleased: what `main` carries past 0.1.1. The date lands with the tag.
+## 0.2.0 — 2026-09-05
 
 - The slides move. Press → and the slide you are on goes out to the
   left, whole, as the next comes in from the right; ← the reverse, ↓ and
