@@ -87,6 +87,26 @@
   compass.appendChild(cnum);
   document.body.appendChild(compass);
 
+  /* The minimap: the map's shape at the size of a stamp, one column per
+   * movement and a cell per slide, the cell you are on lit. On until turned
+   * off with M, and remembered for this deck. */
+  var minimap = document.createElement("nav");
+  minimap.id = "minimap";
+  minimap.setAttribute("aria-label", "Where this slide is in the talk");
+  groups.forEach(function (col, gi) {
+    var c = document.createElement("div");
+    c.className = "mm-col";
+    col.forEach(function (st, si) {
+      var cell = document.createElement("span");
+      cell.className = "mm-cell" + (st.length > 1 ? " build" : "");
+      cell.dataset.g = gi;
+      cell.dataset.s = si;
+      c.appendChild(cell);
+    });
+    minimap.appendChild(c);
+  });
+  document.body.appendChild(minimap);
+
   /* The step indicator lives at the bottom of the screen rather than in
    * the slide, so it is chrome and is built here. It shows only on a
    * slide that animates, which makes its absence the signal that a slide
@@ -158,6 +178,7 @@
     "<dt>A</dt><dd>In that window, put them back beside the deck</dd>" +
     "<dt>O</dt><dd>Overview of every slide; the arrows move the selection</dd>" +
     "<dt>Enter</dt><dd>In the overview, show the selected slide</dd>" +
+    "<dt>M</dt><dd>A map of the talk in the corner, marking where you are</dd>" +
     "<dt>F</dt><dd>Full screen</dd>" +
     "<dt>C</dt><dd>Check every slide for content running off the stage</dd>" +
     "<dt>R</dt><dd>Back to the start, forgetting where each movement was left</dd>" +
@@ -184,6 +205,7 @@
     el.style.left = el.style.top = el.style.transform = "";
     el.style.transformOrigin = "";
     el.style.marginRight = el.style.marginBottom = "";
+    el.style.removeProperty("--k");
   }
 
   function fit() {
@@ -211,11 +233,14 @@
        what is left rather than under the panel. */
     var avail = docked() ? window.innerWidth * (1 - DOCK) : window.innerWidth;
     var scale = Math.min(avail / w, window.innerHeight / h);
+    /* The scale is handed to the stylesheet as --k rather than written
+     * into an inline transform, so that a slide arriving or leaving can
+     * be animated across the window by a rule that still knows how big
+     * it is. Nothing inline, nothing to fight. */
     slides.forEach(function (el) {
       clear(el);
       el.style.left = docked() ? (avail / 2) + "px" : "50%";
-      el.style.transformOrigin = "center center";
-      el.style.transform = "translate(-50%, -50%) scale(" + scale + ")";
+      el.style.setProperty("--k", String(scale));
     });
     place(scale, avail);
   }
@@ -229,24 +254,31 @@
    * the number falls in the compass's own empty cell. */
   function place(scale, avail) {
     var W = css("--w") * scale, H = css("--h") * scale;
-    var right = avail / 2 + W / 2, bottom = window.innerHeight / 2 + H / 2;
-    var size = compass.offsetWidth || 84, gap = 12;
-    var bandX = (avail - W) / 2, bandY = (window.innerHeight - H) / 2;
-    var left, top, outside = true;
-    if (bandX >= size + gap) {
-      left = right + (bandX - size) / 2;
-      top = bottom - size;
-    } else if (bandY >= size + gap) {
-      left = right - size;
-      top = bottom + (bandY - size) / 2;
-    } else {
-      left = right - size - gap;
-      top = bottom - size - gap;
-      outside = false;
+    var right = avail / 2 + W / 2, top0 = window.innerHeight / 2 - H / 2, bottom = top0 + H;
+    var bandX = (avail - W) / 2, bandY = (window.innerHeight - H) / 2, gap = 12;
+    /* One corner of the slide's right edge, the top for the minimap and
+       the bottom for the compass: on the surround beside the slide when
+       the side band has room, in the band above or below when that is
+       where the room is, and just inside the corner otherwise. */
+    function corner(el, w, h, atTop, inset) {
+      var left, top, outside = true;
+      if (bandX >= w + gap) {
+        left = right + (bandX - w) / 2;
+        top = atTop ? top0 : bottom - h;
+      } else if (bandY >= h + gap) {
+        left = right - w - inset;          /* the slide's edge is the screen's here */
+        top = atTop ? (bandY - h) / 2 : bottom + (bandY - h) / 2;
+      } else {
+        left = right - w - inset;
+        top = atTop ? top0 + inset : bottom - h - inset;
+        outside = false;
+      }
+      el.style.left = left + "px";
+      el.style.top = top + "px";
+      el.classList.toggle("outside", outside);
     }
-    compass.style.left = left + "px";
-    compass.style.top = top + "px";
-    compass.classList.toggle("outside", outside);
+    corner(compass, compass.offsetWidth || 84, compass.offsetHeight || 84, false, 12);
+    corner(minimap, minimap.offsetWidth || 60, minimap.offsetHeight || 40, true, 24);
   }
 
   /* ---- navigation */
@@ -361,9 +393,51 @@
     if (to) { g = to.g; s = to.s; y = 0; show(); } else { jump(slides.indexOf(el)); }
   }
 
+  /* Where the deck was at the last show, so the next one knows which way
+   * it moved: a different movement is left or right, a different slide
+   * within one is down or up, and the same slide is a step, which must
+   * not move because a build's whole point is that nothing shifts. The
+   * arriving slide carries the direction and the stylesheet does the
+   * rest. */
+  var shown = null, shownEl = null;
+
+  /* The slide being left stays on screen for the length of the run and
+   * goes out the opposite side, then is put away. animationend is what
+   * normally ends it; the timer is for a page where no animation runs,
+   * reduced motion or the suite, so nothing stays displayed for want of
+   * an event. A move made before the run ends puts the earlier leaver
+   * away at once. */
+  function leave(el, dir) {
+    var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (still) return;
+    var done = function () {
+      el.classList.remove("leaving");
+      el.removeAttribute("data-leave");
+      el.removeEventListener("animationend", done);
+    };
+    el.classList.add("leaving");
+    el.setAttribute("data-leave", dir);
+    el.addEventListener("animationend", done);
+    setTimeout(done, 500);
+  }
+
   function show() {
     marks[g] = { s: s, y: y };
     var here = at();
+    var from = shown;
+    shown = { g: g, s: s };
+    var enter = "";
+    if (from && (from.g !== g || from.s !== s)) {
+      enter = from.g !== g ? (g > from.g ? "right" : "left") : (s > from.s ? "down" : "up");
+    }
+    if (enter) here.setAttribute("data-enter", enter);
+    else here.removeAttribute("data-enter");
+    deck.querySelectorAll(".slide.leaving").forEach(function (el) {
+      el.classList.remove("leaving");
+      el.removeAttribute("data-leave");
+    });
+    if (enter && shownEl && shownEl !== here) leave(shownEl, enter);
+    shownEl = here;
     slides.forEach(function (el) { el.classList.toggle("current", el === here); });
     /* Progress runs over steps, so every press of space moves it. */
     bar.style.width = ((index() + 1) / slides.length * 100) + "%";
@@ -371,6 +445,9 @@
       compass.querySelector(".cdir-" + dir).classList.toggle("live", can(dir));
     });
     cnum.textContent = here.dataset.n;
+    minimap.querySelectorAll(".mm-cell.on").forEach(function (el) { el.classList.remove("on"); });
+    var cell = minimap.querySelector('.mm-cell[data-g="' + g + '"][data-s="' + s + '"]');
+    if (cell) cell.classList.add("on");
     /* The map marks the slide you are on by its number as well as its
        outline, since the outline is easy to lose among 43 thumbnails. */
     deck.querySelectorAll(".stack.current-stack")
@@ -456,6 +533,17 @@
    */
 
   var KEY = ID;
+
+  /* The minimap shows unless it has been turned off, and the choice is
+   * kept for this deck across reloads the way the position is. */
+  function minimapOn(want) {
+    document.body.classList.toggle("minimap", want);
+    try { localStorage.setItem(KEY + ":minimap", want ? "1" : "0"); } catch (e) { /* private mode */ }
+    fit();
+  }
+  var wantMap = true;
+  try { wantMap = localStorage.getItem(KEY + ":minimap") !== "0"; } catch (e) { /* private mode */ }
+  document.body.classList.toggle("minimap", wantMap);
 
   function save() {
     try {
@@ -663,6 +751,7 @@
     else if (k === "c" || k === "C") audit();
     else if (k === "r" || k === "R") confirmReset();
     else if (k === "o" || k === "O") { overview(); }
+    else if (k === "m" || k === "M") { minimapOn(!document.body.classList.contains("minimap")); }
     else if (k === "Enter") {
       if (!document.body.classList.contains("overview")) return;
       openSlide(at());

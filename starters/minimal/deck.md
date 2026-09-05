@@ -31,6 +31,7 @@ align: tight
 - (slate) `A` In that window, put them back beside the deck
 - (slate) `O` Overview of every slide; the arrows move the selection
 - (slate) `Enter` In the overview, show the selected slide
+- (slate) `M` A map of the talk in the corner, marking where you are
 - (slate) `F` Full screen
 - (slate) `C` Check every slide for content running off the stage
 - (slate) `R` Back to the start, forgetting where each movement was left

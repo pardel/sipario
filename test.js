@@ -217,11 +217,17 @@ check('exactly one slide is current', () => {
 });
 
 check('the current slide is scaled to fit the window', () => {
-  const t = current().style.transform;
-  if (!/scale\(/.test(t)) throw new Error(`no scale in transform: ${JSON.stringify(t)}`);
-  const k = Number(t.match(/scale\(([\d.]+)\)/)[1]);
+  /* fit() hands the scale to the stylesheet as --k, and the stylesheet's
+     own rule applies it, so a slide can be animated across the window by
+     a rule that still knows its size. */
+  const k = Number(current().style.getPropertyValue('--k'));
+  if (!k) throw new Error(`no --k on the slide: ${JSON.stringify(current().getAttribute('style'))}`);
   const want = Math.min(1600 / 1280, 900 / 720);        // 1.25
   if (Math.abs(k - want) > 0.001) throw new Error(`scale ${k}, expected ${want}`);
+  const rule = css.match(/\n\.slide \{[^}]*\}/)[0];
+  if (!/transform: translate\(-50%, -50%\) scale\(var\(--k/.test(rule)) {
+    throw new Error('the frame does not scale the slide by --k');
+  }
 });
 
 check('the current slide is centred', () => {
@@ -233,9 +239,7 @@ check('the current slide is centred', () => {
   const c = window.getComputedStyle(el);
   eq(c.left, '50%', 'computed left');
   eq(c.top, '50%', 'computed top');
-  if (!el.style.transform.includes('translate(-50%, -50%)')) {
-    throw new Error(`no centring translate: ${el.style.transform}`);
-  }
+  if (el.style.transform) throw new Error(`an inline transform is back: ${el.style.transform}`);
 });
 
 check('the compass sits by the slide\'s bottom-right corner, outside it when there is room', () => {
@@ -266,6 +270,64 @@ check('the compass sits by the slide\'s bottom-right corner, outside it when the
 
   Object.defineProperty(window, 'innerWidth', { value: 1600, configurable: true });
   window.dispatchEvent(new window.Event('resize'));
+});
+
+check('a slide arrives from the direction it was reached, and a step does not move', () => {
+  /* The direction rides on the arriving slide as data-enter and the
+     stylesheet animates the stage from that side. Movements are left and
+     right, slides within one are down and up, and a step within a build
+     carries nothing, because a build must not shift. */
+  const { doc, current, key, forget } = MOVES;
+  const leaving = () => doc.querySelector('.slide.leaving');
+  forget();
+  key('ArrowRight');
+  eq(current().dataset.enter, 'right', 'the next movement comes from the right');
+  eq(leaving() && leaving().dataset.n, '1.1', 'and the one left stays on for the run');
+  eq(leaving().dataset.leave, 'right', 'going out the way the deck moved');
+  key('ArrowDown');
+  eq(current().dataset.enter, 'down', 'the next slide comes from below');
+  eq(leaving() && leaving().dataset.n, '2.1', 'the earlier leaver is put away when the next move comes');
+  key('ArrowDown');
+  eq(current().dataset.n, '2.2', 'still on the build');
+  eq(current().dataset.enter, undefined, 'its next step does not move');
+  eq(current().parentNode.querySelector('.slide.leaving'), null, 'and no step of it is leaving');
+  key('ArrowLeft');
+  eq(current().dataset.enter, 'left', 'the previous movement comes from the left');
+  key('End');
+  eq(current().dataset.enter, 'right', 'a jump forward comes from the right');
+  key('Home');
+  eq(current().dataset.enter, 'left', 'and a jump back from the left');
+  const ins = css.match(/\.slide\.current\[data-enter="(right|left|down|up)"\]\s+\{[^}]*animation:/g) || [];
+  const outs = css.match(/\.slide\.leaving\[data-leave="(right|left|down|up)"\]\s+\{[^}]*animation:/g) || [];
+  eq(ins.length, 4, 'the frame brings a slide in from all four directions');
+  eq(outs.length, 4, 'and carries one out to all four');
+  eq(/prefers-reduced-motion: reduce\)\s*\{\s*\.slide\[data-enter\], \.slide\.leaving \{\s*animation: none/.test(css), true,
+     'and none of it for someone who asked for less motion');
+});
+
+check('the minimap draws the talk\'s shape and marks the slide you are on', () => {
+  const { doc, key, forget } = MOVES;
+  const mm = doc.getElementById('minimap');
+  eq(doc.body.classList.contains('minimap'), true, 'on to begin with');
+  key('m');
+  eq(doc.body.classList.contains('minimap'), false, 'M hides it');
+  key('m');
+  eq(doc.body.classList.contains('minimap'), true, 'and M again shows it');
+  const cols = [...mm.querySelectorAll('.mm-col')].map((c) => c.querySelectorAll('.mm-cell').length);
+  eq(cols.join(' '), '1 4 1', 'a column per movement, a cell per slide');
+  eq(mm.querySelectorAll('.mm-cell.build').length, 2, 'the two builds are marked');
+  forget();
+  const on = () => { const c = mm.querySelector('.mm-cell.on'); return c.dataset.g + '.' + c.dataset.s; };
+  eq(on(), '0.0', 'the title is lit');
+  key('ArrowRight');
+  eq(on(), '1.0', 'then the next movement\'s first slide');
+  key('ArrowDown');
+  eq(on(), '1.1', 'then the slide below it');
+  key('ArrowDown');
+  eq(on(), '1.1', 'and a step within it moves nothing');
+  eq(mm.querySelectorAll('.mm-cell.on').length, 1, 'one cell lit');
+  key('m');
+  eq(doc.body.classList.contains('minimap'), false, 'M again hides it');
 });
 
 check('the compass lights only the live directions', () => {
@@ -1252,10 +1314,10 @@ check('the deck makes room for the docked notes', () => {
   const d = deckWin.document;
   const at = () => d.querySelector('.slide.current').style;
   d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
-  const on = at().transform.match(/scale\(([\d.]+)\)/)[1];
+  const on = at().getPropertyValue('--k');
   const left = at().left;
   d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
-  const off = at().transform.match(/scale\(([\d.]+)\)/)[1];
+  const off = at().getPropertyValue('--k');
   if (Number(on) >= Number(off)) {
     throw new Error(`docking did not shrink the deck: ${on} then ${off}`);
   }

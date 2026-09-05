@@ -4,6 +4,35 @@ Newest first, one line per thing somebody using sipario would notice.
 Every break is stated as a break: before 1.0 there is no major to spend,
 so a break ships as a minor and this file is the whole of the warning.
 
+## 0.2.0
+
+Unreleased: what `main` carries past 0.1.1. The date lands with the tag.
+
+- The slides move. Press → and the slide you are on goes out to the
+  left, whole, as the next comes in from the right; ← the reverse, ↓ and
+  ↑ the same vertically within a movement, Home and End as a jump back or
+  forward. A step within a build moves nothing. Reduced motion turns it
+  all off. To make it possible the slide's scale is now a custom
+  property, `--k`, applied by the frame's stylesheet, where it used to be
+  an inline transform written by the runtime.
+- A minimap by the slide's top-right corner, on by default: a column per
+  movement, a cell per slide, a build's cell marked, the cell you are on
+  lit in the accent. M hides and shows it, and the choice is kept for the
+  deck. The help overlay names it, and both starters' keys slides carry
+  the row.
+- The compass and the minimap keep an inset from the screen's edge when
+  they sit in the band above or below the slide, where the slide's edge
+  is the screen's.
+- Four tokens a talk may set: `--surround` for the window around the
+  slide, `--surround-ink` and `--surround-accent` for the chrome that
+  sits on it, and `--slide-edge` for a hairline the slide wears. All
+  default to what they were, so a talk that sets none looks as before.
+  The minimal starter sets all four: its window is the slide's paper a
+  shade sunk, so a slide moving in or out crosses nothing darker than
+  that tint, and the slide draws its edge in the theme's hairline.
+- The README shows the mark, the diff slide in both starters, and the
+  moving slides, compass and minimap under "In the room".
+
 ## 0.1.1 — 2026-09-04
 
 The first release. Everything below is what a talk gets from it. 0.1.0

@@ -206,3 +206,8 @@ body.orphan:not(.live) #orphan { display: grid; }
 #orphan span { display: block; margin-top: 10px; font-size: 15px; color: var(--ink-lit-dim); }
 
 
+
+/* The previews show the real slides, and a slide arriving in the deck
+   carries its direction with it; the notes are not the room, so nothing
+   moves here. */
+.shot-box .slide { animation: none; }
