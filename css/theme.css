@@ -158,7 +158,7 @@ html, body {
   overflow: hidden;
 }
 
-.slide.current { display: block; }
+.slide.current { display: block; z-index: 1; }   /* above a slide on its way out */
 
 .slide .stage {
   position: relative;
@@ -199,18 +199,21 @@ html, body {
 @keyframes slide-in-from-above { from { transform: translate(-50%, calc(-50% - 100% * var(--k, 1))) scale(var(--k, 1)); } }
 
 /* The one being left: kept on screen by the runtime for the run, carried
-   out the way the deck moved, and held at the end until it is put away. */
-body:not(.overview) .slide.leaving { display: block; }
+   out the way the deck moved, fading as it goes, and held at the end until
+   it is put away. Under the arriving slide, so the join between the two
+   never lets the surround through; the fade is why nothing is seen to
+   vanish. */
+body:not(.overview) .slide.leaving { display: block; z-index: 0; }
 
 .slide.leaving[data-leave="right"] { animation: slide-out-to-left  480ms cubic-bezier(0.4, 0, 0.2, 1) forwards; }
 .slide.leaving[data-leave="left"]  { animation: slide-out-to-right 480ms cubic-bezier(0.4, 0, 0.2, 1) forwards; }
 .slide.leaving[data-leave="down"]  { animation: slide-out-above    480ms cubic-bezier(0.4, 0, 0.2, 1) forwards; }
 .slide.leaving[data-leave="up"]    { animation: slide-out-below    480ms cubic-bezier(0.4, 0, 0.2, 1) forwards; }
 
-@keyframes slide-out-to-left  { to { transform: translate(calc(-50% - 100% * var(--k, 1)), -50%) scale(var(--k, 1)); } }
-@keyframes slide-out-to-right { to { transform: translate(calc(-50% + 100% * var(--k, 1)), -50%) scale(var(--k, 1)); } }
-@keyframes slide-out-above    { to { transform: translate(-50%, calc(-50% - 100% * var(--k, 1))) scale(var(--k, 1)); } }
-@keyframes slide-out-below    { to { transform: translate(-50%, calc(-50% + 100% * var(--k, 1))) scale(var(--k, 1)); } }
+@keyframes slide-out-to-left  { to { transform: translate(calc(-50% - 100% * var(--k, 1)), -50%) scale(var(--k, 1)); opacity: 0; } }
+@keyframes slide-out-to-right { to { transform: translate(calc(-50% + 100% * var(--k, 1)), -50%) scale(var(--k, 1)); opacity: 0; } }
+@keyframes slide-out-above    { to { transform: translate(-50%, calc(-50% - 100% * var(--k, 1))) scale(var(--k, 1)); opacity: 0; } }
+@keyframes slide-out-below    { to { transform: translate(-50%, calc(-50% + 100% * var(--k, 1))) scale(var(--k, 1)); opacity: 0; } }
 
 body.overview .slide { animation: none; }
 
