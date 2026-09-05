@@ -305,6 +305,29 @@ check('a slide arrives from the direction it was reached, and a step does not mo
      'and none of it for someone who asked for less motion');
 });
 
+check('the minimap draws the talk\'s shape and marks the slide you are on', () => {
+  const { doc, key, forget } = MOVES;
+  const mm = doc.getElementById('minimap');
+  eq(doc.body.classList.contains('minimap'), false, 'off until asked for');
+  key('m');
+  eq(doc.body.classList.contains('minimap'), true, 'M shows it');
+  const cols = [...mm.querySelectorAll('.mm-col')].map((c) => c.querySelectorAll('.mm-cell').length);
+  eq(cols.join(' '), '1 4 1', 'a column per movement, a cell per slide');
+  eq(mm.querySelectorAll('.mm-cell.build').length, 2, 'the two builds are marked');
+  forget();
+  const on = () => { const c = mm.querySelector('.mm-cell.on'); return c.dataset.g + '.' + c.dataset.s; };
+  eq(on(), '0.0', 'the title is lit');
+  key('ArrowRight');
+  eq(on(), '1.0', 'then the next movement\'s first slide');
+  key('ArrowDown');
+  eq(on(), '1.1', 'then the slide below it');
+  key('ArrowDown');
+  eq(on(), '1.1', 'and a step within it moves nothing');
+  eq(mm.querySelectorAll('.mm-cell.on').length, 1, 'one cell lit');
+  key('m');
+  eq(doc.body.classList.contains('minimap'), false, 'M again hides it');
+});
+
 check('the compass lights only the live directions', () => {
   const { window, doc, current, key, forget } = MOVES;
   /* Left and right are the movements; down and up are the slides inside

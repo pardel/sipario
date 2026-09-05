@@ -586,6 +586,46 @@ body:has(.slide.is-dark.current) #compass .cdir.live { color: var(--accent-lit);
 #compass.outside { --compass-ink: var(--surround-ink); }
 body:has(.slide.is-dark.current) #compass { --compass-ink: var(--ink-lit-faint); }
 
+/* ----------------------------------------------------------- minimap
+ *
+ * The map's shape in the top-right corner, by the slide: a column per
+ * movement, a cell per slide, the cell you are on lit in the accent and a
+ * build's cell marked with a second line. Placed by fit() like the
+ * compass, and inked the same way: the slide's ink inside its corner, the
+ * surround's outside, the lit ink over a dark slide. Off until M.
+ */
+
+#minimap {
+  position: fixed;
+  z-index: 45;
+  display: none;
+  grid-auto-flow: column;
+  align-items: start;
+  gap: 5px;
+  --minimap-ink: var(--ink-faint);
+  --minimap-lit: var(--accent);
+}
+
+body.minimap #minimap { display: grid; }
+body.overview #minimap { display: none; }
+
+#minimap.outside { --minimap-ink: var(--surround-ink); --minimap-lit: var(--surround-accent); }
+body:has(.slide.is-dark.current) #minimap { --minimap-ink: var(--ink-lit-faint); --minimap-lit: var(--accent-lit); }
+
+.mm-col { display: grid; gap: 3px; }
+
+.mm-cell {
+  width: 14px;
+  height: 8px;
+  border-radius: 1px;
+  box-shadow: inset 0 0 0 1px var(--minimap-ink);
+  opacity: 0.55;
+}
+
+.mm-cell.build { box-shadow: inset 0 0 0 1px var(--minimap-ink), inset 0 -3px 0 -2px var(--minimap-ink); }
+
+.mm-cell.on { background: var(--minimap-lit); box-shadow: none; opacity: 1; }
+
 /* ------------------------------------------------------- the reset ask
  *
  * A strip rather than a dialog: it has to be readable from the back of a

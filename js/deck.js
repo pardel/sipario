@@ -87,6 +87,26 @@
   compass.appendChild(cnum);
   document.body.appendChild(compass);
 
+  /* The minimap: the map's shape at the size of a stamp, one column per
+   * movement and a cell per slide, the cell you are on lit. Off until
+   * asked for with M, and remembered for this deck. */
+  var minimap = document.createElement("nav");
+  minimap.id = "minimap";
+  minimap.setAttribute("aria-label", "Where this slide is in the talk");
+  groups.forEach(function (col, gi) {
+    var c = document.createElement("div");
+    c.className = "mm-col";
+    col.forEach(function (st, si) {
+      var cell = document.createElement("span");
+      cell.className = "mm-cell" + (st.length > 1 ? " build" : "");
+      cell.dataset.g = gi;
+      cell.dataset.s = si;
+      c.appendChild(cell);
+    });
+    minimap.appendChild(c);
+  });
+  document.body.appendChild(minimap);
+
   /* The step indicator lives at the bottom of the screen rather than in
    * the slide, so it is chrome and is built here. It shows only on a
    * slide that animates, which makes its absence the signal that a slide
@@ -158,6 +178,7 @@
     "<dt>A</dt><dd>In that window, put them back beside the deck</dd>" +
     "<dt>O</dt><dd>Overview of every slide; the arrows move the selection</dd>" +
     "<dt>Enter</dt><dd>In the overview, show the selected slide</dd>" +
+    "<dt>M</dt><dd>A map of the talk in the corner, marking where you are</dd>" +
     "<dt>F</dt><dd>Full screen</dd>" +
     "<dt>C</dt><dd>Check every slide for content running off the stage</dd>" +
     "<dt>R</dt><dd>Back to the start, forgetting where each movement was left</dd>" +
@@ -233,24 +254,31 @@
    * the number falls in the compass's own empty cell. */
   function place(scale, avail) {
     var W = css("--w") * scale, H = css("--h") * scale;
-    var right = avail / 2 + W / 2, bottom = window.innerHeight / 2 + H / 2;
-    var size = compass.offsetWidth || 84, gap = 12;
-    var bandX = (avail - W) / 2, bandY = (window.innerHeight - H) / 2;
-    var left, top, outside = true;
-    if (bandX >= size + gap) {
-      left = right + (bandX - size) / 2;
-      top = bottom - size;
-    } else if (bandY >= size + gap) {
-      left = right - size;
-      top = bottom + (bandY - size) / 2;
-    } else {
-      left = right - size - gap;
-      top = bottom - size - gap;
-      outside = false;
+    var right = avail / 2 + W / 2, top0 = window.innerHeight / 2 - H / 2, bottom = top0 + H;
+    var bandX = (avail - W) / 2, bandY = (window.innerHeight - H) / 2, gap = 12;
+    /* One corner of the slide's right edge, the top for the minimap and
+       the bottom for the compass: on the surround beside the slide when
+       the side band has room, in the band above or below when that is
+       where the room is, and just inside the corner otherwise. */
+    function corner(el, w, h, atTop) {
+      var left, top, outside = true;
+      if (bandX >= w + gap) {
+        left = right + (bandX - w) / 2;
+        top = atTop ? top0 : bottom - h;
+      } else if (bandY >= h + gap) {
+        left = right - w;
+        top = atTop ? (bandY - h) / 2 : bottom + (bandY - h) / 2;
+      } else {
+        left = right - w - gap;
+        top = atTop ? top0 + gap : bottom - h - gap;
+        outside = false;
+      }
+      el.style.left = left + "px";
+      el.style.top = top + "px";
+      el.classList.toggle("outside", outside);
     }
-    compass.style.left = left + "px";
-    compass.style.top = top + "px";
-    compass.classList.toggle("outside", outside);
+    corner(compass, compass.offsetWidth || 84, compass.offsetHeight || 84, false);
+    corner(minimap, minimap.offsetWidth || 60, minimap.offsetHeight || 40, true);
   }
 
   /* ---- navigation */
@@ -417,6 +445,9 @@
       compass.querySelector(".cdir-" + dir).classList.toggle("live", can(dir));
     });
     cnum.textContent = here.dataset.n;
+    minimap.querySelectorAll(".mm-cell.on").forEach(function (el) { el.classList.remove("on"); });
+    var cell = minimap.querySelector('.mm-cell[data-g="' + g + '"][data-s="' + s + '"]');
+    if (cell) cell.classList.add("on");
     /* The map marks the slide you are on by its number as well as its
        outline, since the outline is easy to lose among 43 thumbnails. */
     deck.querySelectorAll(".stack.current-stack")
@@ -502,6 +533,17 @@
    */
 
   var KEY = ID;
+
+  /* Whether the minimap is showing, kept for this deck across reloads
+   * the way the position is. */
+  function minimapOn(want) {
+    document.body.classList.toggle("minimap", want);
+    try { localStorage.setItem(KEY + ":minimap", want ? "1" : ""); } catch (e) { /* private mode */ }
+    fit();
+  }
+  try {
+    if (localStorage.getItem(KEY + ":minimap") === "1") document.body.classList.add("minimap");
+  } catch (e) { /* private mode */ }
 
   function save() {
     try {
@@ -709,6 +751,7 @@
     else if (k === "c" || k === "C") audit();
     else if (k === "r" || k === "R") confirmReset();
     else if (k === "o" || k === "O") { overview(); }
+    else if (k === "m" || k === "M") { minimapOn(!document.body.classList.contains("minimap")); }
     else if (k === "Enter") {
       if (!document.body.classList.contains("overview")) return;
       openSlide(at());

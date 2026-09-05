@@ -21,4 +21,6 @@
 /* `align: tight` closes the rows for a list that has outgrown the
    rhythm, as it does for an icon list. */
 
-.slide.align-tight .labels-row { padding: 4px 0; }
+.slide.align-tight .labels-row { padding: 2px 0; }
+.slide.align-tight .labels-label { font-size: 20px; }
+.slide.align-tight .labels-row p { font-size: 18px; }
