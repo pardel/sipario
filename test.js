@@ -308,9 +308,11 @@ check('a slide arrives from the direction it was reached, and a step does not mo
 check('the minimap draws the talk\'s shape and marks the slide you are on', () => {
   const { doc, key, forget } = MOVES;
   const mm = doc.getElementById('minimap');
-  eq(doc.body.classList.contains('minimap'), false, 'off until asked for');
+  eq(doc.body.classList.contains('minimap'), true, 'on to begin with');
   key('m');
-  eq(doc.body.classList.contains('minimap'), true, 'M shows it');
+  eq(doc.body.classList.contains('minimap'), false, 'M hides it');
+  key('m');
+  eq(doc.body.classList.contains('minimap'), true, 'and M again shows it');
   const cols = [...mm.querySelectorAll('.mm-col')].map((c) => c.querySelectorAll('.mm-cell').length);
   eq(cols.join(' '), '1 4 1', 'a column per movement, a cell per slide');
   eq(mm.querySelectorAll('.mm-cell.build').length, 2, 'the two builds are marked');

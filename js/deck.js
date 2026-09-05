@@ -88,8 +88,8 @@
   document.body.appendChild(compass);
 
   /* The minimap: the map's shape at the size of a stamp, one column per
-   * movement and a cell per slide, the cell you are on lit. Off until
-   * asked for with M, and remembered for this deck. */
+   * movement and a cell per slide, the cell you are on lit. On until turned
+   * off with M, and remembered for this deck. */
   var minimap = document.createElement("nav");
   minimap.id = "minimap";
   minimap.setAttribute("aria-label", "Where this slide is in the talk");
@@ -260,7 +260,7 @@
        the bottom for the compass: on the surround beside the slide when
        the side band has room, in the band above or below when that is
        where the room is, and just inside the corner otherwise. */
-    function corner(el, w, h, atTop) {
+    function corner(el, w, h, atTop, inset) {
       var left, top, outside = true;
       if (bandX >= w + gap) {
         left = right + (bandX - w) / 2;
@@ -269,16 +269,16 @@
         left = right - w;
         top = atTop ? (bandY - h) / 2 : bottom + (bandY - h) / 2;
       } else {
-        left = right - w - gap;
-        top = atTop ? top0 + gap : bottom - h - gap;
+        left = right - w - inset;
+        top = atTop ? top0 + inset : bottom - h - inset;
         outside = false;
       }
       el.style.left = left + "px";
       el.style.top = top + "px";
       el.classList.toggle("outside", outside);
     }
-    corner(compass, compass.offsetWidth || 84, compass.offsetHeight || 84, false);
-    corner(minimap, minimap.offsetWidth || 60, minimap.offsetHeight || 40, true);
+    corner(compass, compass.offsetWidth || 84, compass.offsetHeight || 84, false, 12);
+    corner(minimap, minimap.offsetWidth || 60, minimap.offsetHeight || 40, true, 24);
   }
 
   /* ---- navigation */
@@ -534,16 +534,16 @@
 
   var KEY = ID;
 
-  /* Whether the minimap is showing, kept for this deck across reloads
-   * the way the position is. */
+  /* The minimap shows unless it has been turned off, and the choice is
+   * kept for this deck across reloads the way the position is. */
   function minimapOn(want) {
     document.body.classList.toggle("minimap", want);
-    try { localStorage.setItem(KEY + ":minimap", want ? "1" : ""); } catch (e) { /* private mode */ }
+    try { localStorage.setItem(KEY + ":minimap", want ? "1" : "0"); } catch (e) { /* private mode */ }
     fit();
   }
-  try {
-    if (localStorage.getItem(KEY + ":minimap") === "1") document.body.classList.add("minimap");
-  } catch (e) { /* private mode */ }
+  var wantMap = true;
+  try { wantMap = localStorage.getItem(KEY + ":minimap") !== "0"; } catch (e) { /* private mode */ }
+  document.body.classList.toggle("minimap", wantMap);
 
   function save() {
     try {

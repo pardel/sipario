@@ -592,7 +592,7 @@ body:has(.slide.is-dark.current) #compass { --compass-ink: var(--ink-lit-faint);
  * movement, a cell per slide, the cell you are on lit in the accent and a
  * build's cell marked with a second line. Placed by fit() like the
  * compass, and inked the same way: the slide's ink inside its corner, the
- * surround's outside, the lit ink over a dark slide. Off until M.
+ * surround's outside, the lit ink over a dark slide. On until M turns it off.
  */
 
 #minimap {
