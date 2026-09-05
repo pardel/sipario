@@ -199,38 +199,27 @@ html, body {
 @keyframes slide-in-from-above { from { transform: translate(-50%, calc(-50% - 100% * var(--k, 1))) scale(var(--k, 1)); } }
 
 /* The one being left: kept on screen by the runtime for the run, carried
-   out the way the deck moved in the same 480ms as the arrival, solid all
-   the way, then faded out where it stopped over the 240ms after. Under
-   the arriving slide, so the join between the two never lets the
-   surround through. The timing is per segment: the move shares the
-   arrival's curve so the two stay edge to edge, and the fade eases out
-   on its own. */
+   out the way the deck moved on the arrival's own curve, so the two stay
+   edge to edge, and faded as it goes by a second animation that holds
+   full for the first half of the run and drops steeply at the end. Under
+   the arriving slide, so the join between the two never lets the surround
+   through. */
 body:not(.overview) .slide.leaving { display: block; z-index: 0; }
 
-.slide.leaving[data-leave="right"] { animation: slide-out-to-left  720ms linear forwards; }
-.slide.leaving[data-leave="left"]  { animation: slide-out-to-right 720ms linear forwards; }
-.slide.leaving[data-leave="down"]  { animation: slide-out-above    720ms linear forwards; }
-.slide.leaving[data-leave="up"]    { animation: slide-out-below    720ms linear forwards; }
+.slide.leaving[data-leave="right"] { animation: slide-out-to-left  480ms cubic-bezier(0.4, 0, 0.2, 1) forwards, fade-out-late 480ms forwards; }
+.slide.leaving[data-leave="left"]  { animation: slide-out-to-right 480ms cubic-bezier(0.4, 0, 0.2, 1) forwards, fade-out-late 480ms forwards; }
+.slide.leaving[data-leave="down"]  { animation: slide-out-above    480ms cubic-bezier(0.4, 0, 0.2, 1) forwards, fade-out-late 480ms forwards; }
+.slide.leaving[data-leave="up"]    { animation: slide-out-below    480ms cubic-bezier(0.4, 0, 0.2, 1) forwards, fade-out-late 480ms forwards; }
 
-@keyframes slide-out-to-left {
-  0%       { animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
-  66.667%  { transform: translate(calc(-50% - 100% * var(--k, 1)), -50%) scale(var(--k, 1)); opacity: 1; animation-timing-function: ease-out; }
-  100%     { transform: translate(calc(-50% - 100% * var(--k, 1)), -50%) scale(var(--k, 1)); opacity: 0; }
-}
-@keyframes slide-out-to-right {
-  0%       { animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
-  66.667%  { transform: translate(calc(-50% + 100% * var(--k, 1)), -50%) scale(var(--k, 1)); opacity: 1; animation-timing-function: ease-out; }
-  100%     { transform: translate(calc(-50% + 100% * var(--k, 1)), -50%) scale(var(--k, 1)); opacity: 0; }
-}
-@keyframes slide-out-above {
-  0%       { animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
-  66.667%  { transform: translate(-50%, calc(-50% - 100% * var(--k, 1))) scale(var(--k, 1)); opacity: 1; animation-timing-function: ease-out; }
-  100%     { transform: translate(-50%, calc(-50% - 100% * var(--k, 1))) scale(var(--k, 1)); opacity: 0; }
-}
-@keyframes slide-out-below {
-  0%       { animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
-  66.667%  { transform: translate(-50%, calc(-50% + 100% * var(--k, 1))) scale(var(--k, 1)); opacity: 1; animation-timing-function: ease-out; }
-  100%     { transform: translate(-50%, calc(-50% + 100% * var(--k, 1))) scale(var(--k, 1)); opacity: 0; }
+@keyframes slide-out-to-left  { to { transform: translate(calc(-50% - 100% * var(--k, 1)), -50%) scale(var(--k, 1)); } }
+@keyframes slide-out-to-right { to { transform: translate(calc(-50% + 100% * var(--k, 1)), -50%) scale(var(--k, 1)); } }
+@keyframes slide-out-above    { to { transform: translate(-50%, calc(-50% - 100% * var(--k, 1))) scale(var(--k, 1)); } }
+@keyframes slide-out-below    { to { transform: translate(-50%, calc(-50% + 100% * var(--k, 1))) scale(var(--k, 1)); } }
+
+@keyframes fade-out-late {
+  0%   { opacity: 1; }
+  55%  { opacity: 1; animation-timing-function: ease-in; }
+  100% { opacity: 0; }
 }
 
 body.overview .slide { animation: none; }
