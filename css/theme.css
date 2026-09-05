@@ -111,6 +111,11 @@
   --surround:        var(--ground-deep);
   --surround-ink:    var(--ink-lit-faint);
   --surround-accent: var(--accent-lit);
+
+  /* The slide's edge: nothing by default, since a deep surround draws it
+     already. A talk whose surround is the slide's own paper names a
+     colour here and gets a hairline that moves with the slide. */
+  --slide-edge:      transparent;
 }
 
 /* Slide classes are prefixed `template-` and content classes with the
@@ -163,6 +168,7 @@ html, body {
   color: var(--ink-body);
   transform-origin: center center;
   transform: translate(-50%, -50%) scale(var(--k, 1));
+  box-shadow: 0 0 0 1px var(--slide-edge);   /* outside the box, so nothing inside moves */
   display: none;
   overflow: hidden;
 }

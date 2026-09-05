@@ -54,6 +54,7 @@
   --surround:        var(--ground);
   --surround-ink:    var(--ink-faint);
   --surround-accent: var(--accent);
+  --slide-edge:      var(--hairline);
 }
 
 
