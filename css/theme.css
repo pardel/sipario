@@ -102,6 +102,15 @@
      scaling reads this same value out of CSS, and when the two were
      written down separately one of them was going to move alone. */
   --dock: 34%;
+
+  /* The surround: what shows around the slide when the window is not
+     16:9, and what a slide crosses on its way in or out. Deep by default,
+     with the inks the chrome on it needs; a talk whose slides would rather
+     move over their own paper sets all three, and the map keeps the deep
+     ground regardless, since its thumbnails need the contrast. */
+  --surround:        var(--ground-deep);
+  --surround-ink:    var(--ink-lit-faint);
+  --surround-accent: var(--accent-lit);
 }
 
 /* Slide classes are prefixed `template-` and content classes with the
@@ -116,7 +125,7 @@
 html, body {
   margin: 0;
   height: 100%;
-  background: var(--ground-deep);
+  background: var(--surround);
   font-family: var(--body);
   color: var(--ink-body);
   overflow: hidden;
@@ -254,7 +263,7 @@ body.overview .slide { animation: none; }
   display: flex;
   gap: 6px;
   align-items: center;
-  --steps-ink: var(--ink-lit-faint);
+  --steps-ink: var(--surround-ink);
 }
 
 #steps span {
@@ -266,7 +275,7 @@ body.overview .slide { animation: none; }
 }
 
 #steps span.on {
-  background: var(--accent-lit);
+  background: var(--surround-accent);
   box-shadow: none;
 }
 
@@ -286,7 +295,7 @@ body.overview #steps { display: none; }
   z-index: 40;
 }
 
-#progress-bar { height: 100%; width: 0; background: var(--accent-lit); }
+#progress-bar { height: 100%; width: 0; background: var(--surround-accent); }
 
 /* ---------------------------------------------------------- overview
  *
@@ -303,7 +312,7 @@ body.overview #steps { display: none; }
 
 :root { --ov: 0.125; }
 
-html.overview, body.overview { overflow: auto; height: auto; }
+html.overview, body.overview { overflow: auto; height: auto; background: var(--ground-deep); }
 
 /* The map is the navigation model drawn: a movement is a column and its
    slides run down it, which is exactly what left/right and down/up do.
@@ -559,7 +568,7 @@ body.docked #progress { right: var(--dock); }
    the deep-ground accent are the compass on the surround and over a dark
    slide, the same two places the ink changes. */
 .cdir.live { opacity: 1; cursor: pointer; color: var(--accent); }
-#compass.outside .cdir.live,
+#compass.outside .cdir.live { color: var(--surround-accent); }
 body:has(.slide.is-dark.current) #compass .cdir.live { color: var(--accent-lit); }
 
 /* The vertical pair moves between slides, not through a slide's steps, so
@@ -568,7 +577,7 @@ body:has(.slide.is-dark.current) #compass .cdir.live { color: var(--accent-lit);
 
 /* On the surround, or over a dark slide, the ground is deep and only the
    ink changes, because the fade already works either way. */
-#compass.outside,
+#compass.outside { --compass-ink: var(--surround-ink); }
 body:has(.slide.is-dark.current) #compass { --compass-ink: var(--ink-lit-faint); }
 
 /* ------------------------------------------------------- the reset ask

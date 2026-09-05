@@ -47,6 +47,13 @@
 :root {
   --head: 'Raleway', 'Avenir Next', Helvetica, Arial, sans-serif;
   --body: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+
+  /* The window is the same paper as the slide, so a slide moving in or
+     out crosses nothing darker than itself, and the chrome on the
+     surround takes the slide's own inks. */
+  --surround:        var(--ground);
+  --surround-ink:    var(--ink-faint);
+  --surround-accent: var(--accent);
 }
 
 
