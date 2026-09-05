@@ -124,8 +124,8 @@ html, body {
 
 /* The stacks are structure, not layout: `display: contents` keeps them
    in the DOM for navigation and out of the box tree entirely, so the
-   43 of them cannot push the one visible slide around. Positioning is
-   set inline by fit(), which is the only thing that knows the scale. */
+   43 of them cannot push the one visible slide around. fit() is the only
+   thing that knows the scale, and hands it over as --k. */
 #deck {
   position: fixed;
   inset: 0;
@@ -153,6 +153,7 @@ html, body {
   background: var(--ground);
   color: var(--ink-body);
   transform-origin: center center;
+  transform: translate(-50%, -50%) scale(var(--k, 1));
   display: none;
   overflow: hidden;
 }
@@ -173,32 +174,48 @@ html, body {
 
 /* ---------------------------------------------------------------- motion
  *
- * A slide arrives from the direction it was reached: left and right are
- * the movements, down and up the slides within one, so the stage comes
- * in from that side. A step within a build carries no direction and does
- * not move. The run is short and one way, there is nothing on the way
- * out, and anyone who asked their system for less motion gets none. The
- * animation is on the stage rather than the slide, whose transform is
- * fit()'s to set.
+ * The slides move. Left and right are the movements, down and up the
+ * slides within one, so the slide being left goes out that way, whole,
+ * background and all, while the next comes in from the opposite side,
+ * and for the length of the run both are on screen. A step within a
+ * build carries no direction and nothing moves, because a build's whole
+ * point is that nothing shifts.
+ *
+ * The distance is one slide as the room sees it: the box is --w wide and
+ * fit() has scaled it by --k, so a translate of 100% of the box times --k
+ * is exactly its width on screen, which is what carries a slide from
+ * fully off to centred. The centring translate and the scale ride along
+ * so the rule below and the one for .slide describe the same box.
  */
 
-.slide[data-enter="right"] .stage { animation: enter-right 420ms cubic-bezier(0.2, 0.7, 0.2, 1); }
-.slide[data-enter="left"]  .stage { animation: enter-left  420ms cubic-bezier(0.2, 0.7, 0.2, 1); }
-.slide[data-enter="down"]  .stage { animation: enter-down  420ms cubic-bezier(0.2, 0.7, 0.2, 1); }
-.slide[data-enter="up"]    .stage { animation: enter-up    420ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+.slide.current[data-enter="right"] { animation: slide-in-from-right 480ms cubic-bezier(0.4, 0, 0.2, 1); }
+.slide.current[data-enter="left"]  { animation: slide-in-from-left  480ms cubic-bezier(0.4, 0, 0.2, 1); }
+.slide.current[data-enter="down"]  { animation: slide-in-from-below 480ms cubic-bezier(0.4, 0, 0.2, 1); }
+.slide.current[data-enter="up"]    { animation: slide-in-from-above 480ms cubic-bezier(0.4, 0, 0.2, 1); }
 
-/* A tenth of the stage's width, or of its height: far enough that the
-   room reads the direction, near enough that the words are already
-   where they will stay by the time the eye has found them. */
-@keyframes enter-right { from { transform: translateX(128px);  opacity: 0; } }
-@keyframes enter-left  { from { transform: translateX(-128px); opacity: 0; } }
-@keyframes enter-down  { from { transform: translateY(72px);   opacity: 0; } }
-@keyframes enter-up    { from { transform: translateY(-72px);  opacity: 0; } }
+@keyframes slide-in-from-right { from { transform: translate(calc(-50% + 100% * var(--k, 1)), -50%) scale(var(--k, 1)); } }
+@keyframes slide-in-from-left  { from { transform: translate(calc(-50% - 100% * var(--k, 1)), -50%) scale(var(--k, 1)); } }
+@keyframes slide-in-from-below { from { transform: translate(-50%, calc(-50% + 100% * var(--k, 1))) scale(var(--k, 1)); } }
+@keyframes slide-in-from-above { from { transform: translate(-50%, calc(-50% - 100% * var(--k, 1))) scale(var(--k, 1)); } }
 
-body.overview .slide .stage { animation: none; }
+/* The one being left: kept on screen by the runtime for the run, carried
+   out the way the deck moved, and held at the end until it is put away. */
+body:not(.overview) .slide.leaving { display: block; }
+
+.slide.leaving[data-leave="right"] { animation: slide-out-to-left  480ms cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+.slide.leaving[data-leave="left"]  { animation: slide-out-to-right 480ms cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+.slide.leaving[data-leave="down"]  { animation: slide-out-above    480ms cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+.slide.leaving[data-leave="up"]    { animation: slide-out-below    480ms cubic-bezier(0.4, 0, 0.2, 1) forwards; }
+
+@keyframes slide-out-to-left  { to { transform: translate(calc(-50% - 100% * var(--k, 1)), -50%) scale(var(--k, 1)); } }
+@keyframes slide-out-to-right { to { transform: translate(calc(-50% + 100% * var(--k, 1)), -50%) scale(var(--k, 1)); } }
+@keyframes slide-out-above    { to { transform: translate(-50%, calc(-50% - 100% * var(--k, 1))) scale(var(--k, 1)); } }
+@keyframes slide-out-below    { to { transform: translate(-50%, calc(-50% + 100% * var(--k, 1))) scale(var(--k, 1)); } }
+
+body.overview .slide { animation: none; }
 
 @media (prefers-reduced-motion: reduce) {
-  .slide[data-enter] .stage { animation: none; }
+  .slide[data-enter], .slide.leaving { animation: none; }
 }
 
 /* notes never reach the projector; the presenter view reads them */

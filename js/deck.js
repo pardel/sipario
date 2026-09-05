@@ -184,6 +184,7 @@
     el.style.left = el.style.top = el.style.transform = "";
     el.style.transformOrigin = "";
     el.style.marginRight = el.style.marginBottom = "";
+    el.style.removeProperty("--k");
   }
 
   function fit() {
@@ -211,11 +212,14 @@
        what is left rather than under the panel. */
     var avail = docked() ? window.innerWidth * (1 - DOCK) : window.innerWidth;
     var scale = Math.min(avail / w, window.innerHeight / h);
+    /* The scale is handed to the stylesheet as --k rather than written
+     * into an inline transform, so that a slide arriving or leaving can
+     * be animated across the window by a rule that still knows how big
+     * it is. Nothing inline, nothing to fight. */
     slides.forEach(function (el) {
       clear(el);
       el.style.left = docked() ? (avail / 2) + "px" : "50%";
-      el.style.transformOrigin = "center center";
-      el.style.transform = "translate(-50%, -50%) scale(" + scale + ")";
+      el.style.setProperty("--k", String(scale));
     });
     place(scale, avail);
   }
@@ -367,7 +371,27 @@
    * not move because a build's whole point is that nothing shifts. The
    * arriving slide carries the direction and the stylesheet does the
    * rest. */
-  var shown = null;
+  var shown = null, shownEl = null;
+
+  /* The slide being left stays on screen for the length of the run and
+   * goes out the opposite side, then is put away. animationend is what
+   * normally ends it; the timer is for a page where no animation runs,
+   * reduced motion or the suite, so nothing stays displayed for want of
+   * an event. A move made before the run ends puts the earlier leaver
+   * away at once. */
+  function leave(el, dir) {
+    var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (still) return;
+    var done = function () {
+      el.classList.remove("leaving");
+      el.removeAttribute("data-leave");
+      el.removeEventListener("animationend", done);
+    };
+    el.classList.add("leaving");
+    el.setAttribute("data-leave", dir);
+    el.addEventListener("animationend", done);
+    setTimeout(done, 700);
+  }
 
   function show() {
     marks[g] = { s: s, y: y };
@@ -380,6 +404,12 @@
     }
     if (enter) here.setAttribute("data-enter", enter);
     else here.removeAttribute("data-enter");
+    deck.querySelectorAll(".slide.leaving").forEach(function (el) {
+      el.classList.remove("leaving");
+      el.removeAttribute("data-leave");
+    });
+    if (enter && shownEl && shownEl !== here) leave(shownEl, enter);
+    shownEl = here;
     slides.forEach(function (el) { el.classList.toggle("current", el === here); });
     /* Progress runs over steps, so every press of space moves it. */
     bar.style.width = ((index() + 1) / slides.length * 100) + "%";

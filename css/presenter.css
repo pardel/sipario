@@ -210,4 +210,4 @@ body.orphan:not(.live) #orphan { display: grid; }
 /* The previews show the real slides, and a slide arriving in the deck
    carries its direction with it; the notes are not the room, so nothing
    moves here. */
-.shot-box .slide .stage { animation: none; }
+.shot-box .slide { animation: none; }
