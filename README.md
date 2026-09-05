@@ -148,11 +148,26 @@ template: [`docs/TEMPLATES.md`](docs/TEMPLATES.md).
 | <kbd>←</kbd> <kbd>→</kbd> | the previous and next movement |
 | <kbd>↓</kbd> <kbd>↑</kbd> | down and up the movement, stepping any build on the way |
 | <kbd>O</kbd> | the map: every slide at once, <kbd>Enter</kbd> to go to one |
+| <kbd>M</kbd> | the minimap, on by default: the talk's shape in the corner, the slide you are on lit |
 | <kbd>P</kbd> | the notes, docked beside the deck |
 | <kbd>D</kbd> | the notes, in a window of their own, and back |
 | <kbd>T</kbd> | the clock: start, pause, then reset |
 | <kbd>R</kbd> | forget where each movement was left |
 | <kbd>C</kbd> | measure every step against the stage and name what overflows |
+
+The slides move the way the deck does. Press <kbd>→</kbd> and the slide
+you are on goes out to the left, whole, as the next comes in from the
+right; <kbd>↓</kbd> and <kbd>↑</kbd> do the same vertically within a
+movement, and a step within a build moves nothing, since a build's whole
+point is that nothing shifts. Anyone whose system asks for reduced motion
+gets none.
+
+Two pieces of chrome sit by the slide's right edge: a compass at the foot,
+lit only in the directions there is somewhere to go and carrying the
+slide's number in its middle, and the minimap at the head, a column per
+movement and a cell per slide with a build's cell marked. Both sit on the
+surround when the screen has room beside the slide and just inside its
+corner when it has not, so neither ever straddles the edge.
 
 The notes are off until asked for, deliberately: a panel that opened by
 itself would put your script on whatever screen the deck is being shared
