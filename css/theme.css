@@ -182,15 +182,18 @@ html, body {
  * fit()'s to set.
  */
 
-.slide[data-enter="right"] .stage { animation: enter-right 260ms cubic-bezier(0.2, 0.7, 0.2, 1); }
-.slide[data-enter="left"]  .stage { animation: enter-left  260ms cubic-bezier(0.2, 0.7, 0.2, 1); }
-.slide[data-enter="down"]  .stage { animation: enter-down  260ms cubic-bezier(0.2, 0.7, 0.2, 1); }
-.slide[data-enter="up"]    .stage { animation: enter-up    260ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+.slide[data-enter="right"] .stage { animation: enter-right 420ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+.slide[data-enter="left"]  .stage { animation: enter-left  420ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+.slide[data-enter="down"]  .stage { animation: enter-down  420ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+.slide[data-enter="up"]    .stage { animation: enter-up    420ms cubic-bezier(0.2, 0.7, 0.2, 1); }
 
-@keyframes enter-right { from { transform: translateX(36px);  opacity: 0; } }
-@keyframes enter-left  { from { transform: translateX(-36px); opacity: 0; } }
-@keyframes enter-down  { from { transform: translateY(28px);  opacity: 0; } }
-@keyframes enter-up    { from { transform: translateY(-28px); opacity: 0; } }
+/* A tenth of the stage's width, or of its height: far enough that the
+   room reads the direction, near enough that the words are already
+   where they will stay by the time the eye has found them. */
+@keyframes enter-right { from { transform: translateX(128px);  opacity: 0; } }
+@keyframes enter-left  { from { transform: translateX(-128px); opacity: 0; } }
+@keyframes enter-down  { from { transform: translateY(72px);   opacity: 0; } }
+@keyframes enter-up    { from { transform: translateY(-72px);  opacity: 0; } }
 
 body.overview .slide .stage { animation: none; }
 
