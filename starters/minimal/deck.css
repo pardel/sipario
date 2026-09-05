@@ -48,10 +48,11 @@
   --head: 'Raleway', 'Avenir Next', Helvetica, Arial, sans-serif;
   --body: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
 
-  /* The window is the same paper as the slide, so a slide moving in or
-     out crosses nothing darker than itself, and the chrome on the
-     surround takes the slide's own inks. */
-  --surround:        var(--ground);
+  /* The window is the slide's paper a shade sunk, the ground a slide
+     steps back onto, so a slide moving in or out crosses nothing darker
+     than a tint, and the chrome on the surround takes the slide's own
+     inks. */
+  --surround:        var(--ground-sunk);
   --surround-ink:    var(--ink-faint);
   --surround-accent: var(--accent);
   --slide-edge:      var(--hairline);
