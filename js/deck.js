@@ -390,7 +390,7 @@
     el.classList.add("leaving");
     el.setAttribute("data-leave", dir);
     el.addEventListener("animationend", done);
-    setTimeout(done, 700);
+    setTimeout(done, 1000);
   }
 
   function show() {
