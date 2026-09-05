@@ -266,7 +266,7 @@
         left = right + (bandX - w) / 2;
         top = atTop ? top0 : bottom - h;
       } else if (bandY >= h + gap) {
-        left = right - w;
+        left = right - w - inset;          /* the slide's edge is the screen's here */
         top = atTop ? (bandY - h) / 2 : bottom + (bandY - h) / 2;
       } else {
         left = right - w - inset;
