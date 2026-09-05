@@ -1,6 +1,6 @@
 {
   "name": "sipario",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A markdown deck, rendered: the format, the renderer and its checks, the deck runtime, the presenter window and a server that renders per request. Ships no templates and no design — those belong to the talk.",
   "license": "MIT",
   "repository": {
