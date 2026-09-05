@@ -188,10 +188,10 @@ html, body {
  * so the rule below and the one for .slide describe the same box.
  */
 
-.slide.current[data-enter="right"] { animation: slide-in-from-right 480ms cubic-bezier(0.4, 0, 0.2, 1); }
-.slide.current[data-enter="left"]  { animation: slide-in-from-left  480ms cubic-bezier(0.4, 0, 0.2, 1); }
-.slide.current[data-enter="down"]  { animation: slide-in-from-below 480ms cubic-bezier(0.4, 0, 0.2, 1); }
-.slide.current[data-enter="up"]    { animation: slide-in-from-above 480ms cubic-bezier(0.4, 0, 0.2, 1); }
+.slide.current[data-enter="right"] { animation: slide-in-from-right 336ms cubic-bezier(0.4, 0, 0.2, 1); }
+.slide.current[data-enter="left"]  { animation: slide-in-from-left  336ms cubic-bezier(0.4, 0, 0.2, 1); }
+.slide.current[data-enter="down"]  { animation: slide-in-from-below 336ms cubic-bezier(0.4, 0, 0.2, 1); }
+.slide.current[data-enter="up"]    { animation: slide-in-from-above 336ms cubic-bezier(0.4, 0, 0.2, 1); }
 
 @keyframes slide-in-from-right { from { transform: translate(calc(-50% + 100% * var(--k, 1)), -50%) scale(var(--k, 1)); } }
 @keyframes slide-in-from-left  { from { transform: translate(calc(-50% - 100% * var(--k, 1)), -50%) scale(var(--k, 1)); } }
@@ -206,10 +206,10 @@ html, body {
    through. */
 body:not(.overview) .slide.leaving { display: block; z-index: 0; }
 
-.slide.leaving[data-leave="right"] { animation: slide-out-to-left  480ms cubic-bezier(0.4, 0, 0.2, 1) forwards, fade-out-late 480ms forwards; }
-.slide.leaving[data-leave="left"]  { animation: slide-out-to-right 480ms cubic-bezier(0.4, 0, 0.2, 1) forwards, fade-out-late 480ms forwards; }
-.slide.leaving[data-leave="down"]  { animation: slide-out-above    480ms cubic-bezier(0.4, 0, 0.2, 1) forwards, fade-out-late 480ms forwards; }
-.slide.leaving[data-leave="up"]    { animation: slide-out-below    480ms cubic-bezier(0.4, 0, 0.2, 1) forwards, fade-out-late 480ms forwards; }
+.slide.leaving[data-leave="right"] { animation: slide-out-to-left  336ms cubic-bezier(0.4, 0, 0.2, 1) forwards, fade-out-late 336ms forwards; }
+.slide.leaving[data-leave="left"]  { animation: slide-out-to-right 336ms cubic-bezier(0.4, 0, 0.2, 1) forwards, fade-out-late 336ms forwards; }
+.slide.leaving[data-leave="down"]  { animation: slide-out-above    336ms cubic-bezier(0.4, 0, 0.2, 1) forwards, fade-out-late 336ms forwards; }
+.slide.leaving[data-leave="up"]    { animation: slide-out-below    336ms cubic-bezier(0.4, 0, 0.2, 1) forwards, fade-out-late 336ms forwards; }
 
 @keyframes slide-out-to-left  { to { transform: translate(calc(-50% - 100% * var(--k, 1)), -50%) scale(var(--k, 1)); } }
 @keyframes slide-out-to-right { to { transform: translate(calc(-50% + 100% * var(--k, 1)), -50%) scale(var(--k, 1)); } }
