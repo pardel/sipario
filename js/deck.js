@@ -173,12 +173,15 @@
     "<dt>&larr; &rarr;</dt><dd>Previous and next part of the talk</dd>" +
     "<dt>&darr; &uarr;</dt><dd>Next and previous step, then slide, within a part</dd>" +
     "<dt>Home / End</dt><dd>First and last slide</dd>" +
+    "<dt>Shift &uarr;</dt><dd>Top of the current part</dd>" +
     "<dt>P</dt><dd>Show or hide the notes beside the deck</dd>" +
     "<dt>D</dt><dd>Move the notes to their own window, or bring them back</dd>" +
     "<dt>A</dt><dd>In that window, put them back beside the deck</dd>" +
+    "<dt>1 / 2</dt><dd>In the notes, hide or show the current or the next slide</dd>" +
+    "<dt>+ / -</dt><dd>In the notes, a bigger or a smaller script</dd>" +
     "<dt>O</dt><dd>Overview of every slide; the arrows move the selection</dd>" +
     "<dt>Enter</dt><dd>In the overview, show the selected slide</dd>" +
-    "<dt>M</dt><dd>A map of the talk in the corner, marking where you are</dd>" +
+    "<dt>M</dt><dd>A map of the talk in the corner, here and in the notes, marking where you are</dd>" +
     "<dt>F</dt><dd>Full screen</dd>" +
     "<dt>C</dt><dd>Check every slide for content running off the stage</dd>" +
     "<dt>R</dt><dd>Back to the start, forgetting where each movement was left</dd>" +
@@ -368,6 +371,13 @@
     crossTo(g - 1, "end");
   }
 
+  /* Back to the head of the movement you are in, however deep into it
+   * you have read. Shift with the up arrow, because it is the up arrow's
+   * job done all at once, and a clicker never sends it. */
+  function top() {
+    crossTo(g, "top");
+  }
+
   function locate(el) {
     for (var i = 0; i < groups.length; i++) {
       for (var j = 0; j < groups[i].length; j++) {
@@ -540,6 +550,9 @@
     document.body.classList.toggle("minimap", want);
     try { localStorage.setItem(KEY + ":minimap", want ? "1" : "0"); } catch (e) { /* private mode */ }
     fit();
+    /* The notes carry a map of their own, and M governs both: one key,
+       one answer to whether the map is showing. */
+    publish();
   }
   var wantMap = true;
   try { wantMap = localStorage.getItem(KEY + ":minimap") !== "0"; } catch (e) { /* private mode */ }
@@ -573,6 +586,38 @@
    */
 
   var CHANNEL = ID;
+
+  /* ---- which deck window a panel belongs to
+   *
+   * The channel is named for the deck, which keeps two different talks
+   * from driving each other. It does not separate two windows of the
+   * *same* talk, and opening one twice is ordinary: a deck on the
+   * projector and a deck on the laptop, or a second tab opened to check
+   * a slide. Every deck window was broadcasting its position to every
+   * panel on the channel, and every panel obeyed whichever spoke last,
+   * so a panel showed the script for a slide its own deck was not on.
+   *
+   * Each window therefore carries an id, and a panel only listens to the
+   * window that opened it. sessionStorage is exactly the right lifetime:
+   * per tab, so two windows differ, and it survives the live reload, so
+   * a detached panel is not orphaned every time deck.md is saved.
+   */
+  /* Keyed by nothing but the tab: sessionStorage is per tab already, and
+     keying it by the deck's name meant a renamed deck came back with a
+     new id and lost the window that was still answering to the old one. */
+  var TAB;
+  try {
+    TAB = sessionStorage.getItem("notes-tab");
+    if (!TAB) {
+      TAB = Math.random().toString(36).slice(2, 10);
+      sessionStorage.setItem("notes-tab", TAB);
+    }
+  } catch (e) {
+    /* Private mode, or storage refused. A per-load id still separates two
+       windows; it only costs a detached panel its pairing on reload. */
+    TAB = Math.random().toString(36).slice(2, 10);
+  }
+
   /* Read from CSS rather than repeated here: `--dock` sizes the panel and
      this scales the deck to what is left, and two copies of one number
      drift the first time either is touched. */
@@ -581,7 +626,11 @@
   var win = null;
 
   function publish() {
-    if (bus) bus.postMessage({ from: "deck", type: "state", g: g, s: s, y: y });
+    /* `v` is the deck this window is showing, by the reload stream's
+       token, so the notes can wait for it rather than run ahead: a deck in
+       fullscreen holds a save back, and its notes must hold it back too. */
+    if (bus) bus.postMessage({ from: "deck", type: "state", tab: TAB, g: g, s: s, y: y,
+                               map: document.body.classList.contains("minimap"), v: token });
   }
 
   /* The notes show either docked beside the deck or in a window of their
@@ -608,7 +657,8 @@
       '<span>Notes</span>' +
       '<button type="button" id="dock-detach" title="Open in its own window (D)">detach</button>' +
       '<button type="button" id="dock-close" title="Hide the notes (P)">close</button>' +
-      '</div><iframe id="dock-frame" src="/presenter" title="Presenter notes"></iframe>';
+      '</div><iframe id="dock-frame" src="/presenter?tab=' + encodeURIComponent(TAB) +
+      '" title="Presenter notes"></iframe>';
     document.body.appendChild(dock);
     document.getElementById("dock-detach").addEventListener("click", function () { setNotes("detached"); });
     document.getElementById("dock-close").addEventListener("click", function () { setNotes("hidden"); });
@@ -631,7 +681,7 @@
     }
 
     if (mode === "detached" && !detached()) {
-      win = window.open("/presenter", CHANNEL,
+      win = window.open("/presenter?tab=" + encodeURIComponent(TAB), "notes:" + TAB,
         "width=980,height=760,menubar=no,toolbar=no,location=no");
       if (!win) {
         /* Popup blocked. Dock them instead of silently doing nothing, and
@@ -652,6 +702,25 @@
 
   function notesShowing() { return docked() || detached(); }
 
+  /* A reload keeps the detached window open and loses the handle to it,
+     so the deck came back believing the notes were hidden: P then docked
+     a second copy beside the deck, the script on the shared screen. The
+     window is named for this deck, so it can be taken back by name; it is
+     only asked for once a window has answered the roll-call, because
+     opening a name nobody holds opens a blank window instead. */
+  function reclaim() {
+    if (detached()) return;
+    var w = window.open("", "notes:" + TAB);
+    if (!w || w.closed) return;
+    win = w;
+    document.body.classList.remove("docked");
+    fit();
+    save();
+  }
+  function rollCall() {
+    if (bus) bus.postMessage({ from: "deck", type: "roll-call", tab: TAB });
+  }
+
   /* P shows the notes, or hides whichever way they are showing. */
   function toggleNotes() { setNotes(notesShowing() ? "hidden" : "docked"); }
 
@@ -662,7 +731,15 @@
     bus.onmessage = function (ev) {
       var m = ev.data || {};
       if (m.from !== "presenter") return;
-      if (m.type === "hello") { publish(); return; }
+      /* Addressed to another deck window: its panel, not ours. A panel
+         opened by hand carries no tab and is answered by every deck, which
+         is the only useful thing it can mean. */
+      if (m.tab && m.tab !== TAB) return;
+      /* A window of this tab's saying hello is presence too, so a deck
+         whose roll-call went unanswered, because the window was still
+         moving to this channel, takes it back on the hello instead. */
+      if (m.type === "hello") { if (m.detached) reclaim(); publish(); return; }
+      if (m.type === "here") { reclaim(); return; }
       if (m.type === "attach") { setNotes("docked"); return; }
       /* The notes ask before sending this, in their own window, so it
          arrives already confirmed. It forgets silently: the deck window
@@ -672,6 +749,8 @@
       if (m.type === "go") { go(m.dir); return; }
       if (m.type === "next") { next(); return; }
       if (m.type === "back") { back(); return; }
+      if (m.type === "top") { top(); return; }
+      if (m.type === "map") { minimapOn(!document.body.classList.contains("minimap")); return; }
       if (m.type === "jump" && groups[m.g] && groups[m.g][m.s] && groups[m.g][m.s][m.y]) {
         g = m.g; s = m.s; y = m.y; show();
       }
@@ -691,7 +770,7 @@
    * question no longer arises.
    */
 
-  var watching = "starting", token = null;
+  var watching = "starting", token = null, pending = null;
 
   function watchNote() {
     var el = document.getElementById("watch-note");
@@ -708,14 +787,26 @@
     stream.onmessage = function (ev) {
       watching = "watching";
       watchNote();
-      if (token === null) { token = ev.data; return; }
+      /* The first token names the version on screen. Say so to the
+         notes at once: a window waiting to apply this version has been
+         told `null` until now. */
+      if (token === null) { token = ev.data; publish(); return; }
       if (ev.data === token) return;
+      /* Never yank the deck out from under a talk. The save is held, not
+         dropped: leaving fullscreen takes it. Until then `token` stays at
+         the version on screen, which is what the notes follow. */
+      if (document.fullscreenElement) { pending = ev.data; return; }
       token = ev.data;
-      /* Never yank the deck out from under a talk. */
-      if (document.fullscreenElement) return;
       save();
       location.reload();
     };
+    document.addEventListener("fullscreenchange", function () {
+      if (document.fullscreenElement || pending === null) return;
+      token = pending;
+      pending = null;
+      save();
+      location.reload();
+    });
     stream.onerror = function () { watching = "blocked"; watchNote(); };
   } else {
     watching = "blocked";
@@ -743,6 +834,7 @@
     else if (k === "ArrowRight") go("right");
     else if (k === "ArrowLeft") go("left");
     else if (k === "ArrowDown") go("down");
+    else if (k === "ArrowUp" && ev.shiftKey) top();
     else if (k === "ArrowUp") go("up");
     else if (k === "Home") jump(0);
     else if (k === "End") jump(slides.length - 1);
@@ -760,6 +852,14 @@
       if (document.fullscreenElement) document.exitFullscreen();
       else document.documentElement.requestFullscreen();
     }
+    /* The notes' own keys, forwarded rather than acted on. Docked, the
+       notes are an iframe and the hands are on this window; detached,
+       the notes answer these themselves, and a second copy arriving over
+       the bus would toggle twice. */
+    else if (k === "1" || k === "2" || k === "+" || k === "=" || k === "-" || k === "_") {
+      if (!notesShowing()) return;
+      if (bus && !detached()) bus.postMessage({ from: "deck", type: "panel", tab: TAB, key: k });
+    }
     else if (k === "?") document.body.classList.toggle("help");
     else if (k === "Escape") { document.body.classList.remove("help", "audit"); overview(false); }
     else return;
@@ -776,6 +876,7 @@
   window.addEventListener("resize", fit);
 
   var saved = restore();
+  rollCall();                          // a detached window of this tab's, if any, answers
   if (saved) {
     if (saved.marks && typeof saved.marks === "object") marks = saved.marks;
     if (saved.docked) setNotes("docked");

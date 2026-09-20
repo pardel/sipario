@@ -96,7 +96,7 @@ Broadly, what they cover:
 | Region | Checks |
 |---|---|
 | the page | `deck.js` runs, exactly one slide is current, and it is scaled to the window and centred |
-| moving through a talk | the arrows and PageDown reach every step in order, each movement remembers where it was left, the map opens and Enter plays a build rather than dropping you at its end |
+| moving through a talk | the arrows and PageDown reach every step in order, each movement remembers where it was left, Shift with up returns to the head of the movement you are in, the map opens and Enter plays a build rather than dropping you at its end |
 | builds and figures | a step adds rather than restates, height is reserved so nothing shifts, a layered SVG reveals one group per step, and a misspelt layer name stops the render |
 | ids and numbers | every slide declares both, a number or a section that disagrees with where the slide sits stops the render, and `renumber` agrees with the renderer |
 | the presenter window | docked and detached are the same page, the channel between the two windows carries both directions, and the reset asks before forgetting |
