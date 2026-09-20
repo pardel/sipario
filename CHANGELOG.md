@@ -4,7 +4,7 @@ Newest first, one line per thing somebody using sipario would notice.
 Every break is stated as a break: before 1.0 there is no major to spend,
 so a break ships as a minor and this file is the whole of the warning.
 
-## Unreleased
+## 0.3.0 — 2026-09-20
 
 - **Fixed:** the docked notes announced themselves as a window. Whether
   the page is the dock's frame was decided after the first hello went
