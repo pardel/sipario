@@ -21,17 +21,43 @@ html, body {
    There used to be a breakpoint at 820px that stacked them into one
    column, which meant the docked panel and the detached window were the
    same page wearing two different layouts.
-   
+
    The rail is proportional rather than a fixed 300px: fixed, it took
-   two thirds of a 435px dock and left the preview 115px wide. */
+   two thirds of a 435px dock and left the preview 115px wide.
+
+   The two previews are stacked in the left column, the clock and the
+   position sit to their right, and the script runs the whole width
+   underneath. The previews used to sit apart, one across the top and one
+   down the side, which set the panel's width by the wider of two
+   pictures of slides the presenter has already seen. Stacked, they are
+   one narrow column: the next slide under the current one, and the
+   script full width below with the room it needs to be read from a
+   lectern. */
 #wrap {
   display: grid;
-  grid-template-columns: 1fr minmax(150px, 300px);
+  grid-template-columns: minmax(140px, 34%) 1fr;
   grid-template-rows: auto 1fr;
   gap: 18px;
   height: 100%;
   padding: 18px;
   box-sizing: border-box;
+}
+
+/* With both previews put away the left column holds nothing, so the
+   clock moves over and the script keeps the width it already had. This
+   is a state the presenter chose, not a breakpoint guessing at one,
+   which is why it may change the layout when a media query may not. */
+#wrap.bare { grid-template-columns: auto 1fr; }
+#wrap.bare #rail { max-width: 190px; }
+
+/* The previews, one under the other. The row is sized by them, so a
+   third thing added here comes out of the script's height and should be
+   put in the side column instead. */
+#rail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
 }
 
 .pane { min-width: 0; }
@@ -68,16 +94,82 @@ h4 {
   margin: 0;
 }
 
-#next-label {
-  margin: 8px 0 0;
-  font-size: 13px;
-  line-height: 1.35;
-  color: var(--ink-lit-dim);
-}
-
 /* ---- the side column ------------------------------------------------- */
 
-#side { display: flex; flex-direction: column; gap: 18px; }
+/* Two columns: the clock and its neighbours stack down the first, the
+   map takes the second, from the top. It was one column with the map at
+   its head, which sat the clock a map's height down the panel and, docked
+   beside the deck, put Elapsed in the middle of the screen. */
+#side {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-auto-rows: max-content;
+  gap: 18px;
+  align-content: start;
+}
+
+#side > * { grid-column: 1; }
+
+/* The map, top right of the panel, in the deck's minimap dress: the cell
+   and column rules are the frame's, and only the inks are set here, for
+   the dark ground. M, on the deck or here, shows or hides both maps. */
+#notes-map {
+  grid-column: 2;
+  grid-row: 1 / span 8;
+  display: grid;
+  grid-auto-flow: column;
+  justify-content: end;
+  align-items: start;
+  gap: 5px;
+  --minimap-ink: var(--ink-lit-faint);
+  --minimap-lit: var(--accent-lit);
+}
+
+#notes-map.hidden { display: none; }
+
+/* ---- hiding a preview ------------------------------------------------
+   Either preview can be put away, because what a presenter needs from
+   this panel changes between rehearsing and standing up: the slide the
+   room is seeing is behind you on a screen anyway, and a talk you know
+   does not need to be told what is coming. What is hidden is the
+   picture, never the label, so the way back is where the way out was.
+   The choice is remembered per deck, since it is a habit rather than a
+   setting. */
+
+.shelf-btn {
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.shelf-btn:hover { color: var(--ink-lit); }
+
+/* Set from the label's own size, so the icon is the height of the word
+   it sits beside whatever that word is set at. */
+.eye {
+  width: 1.3em;
+  height: 1.3em;
+  margin-left: 7px;
+  vertical-align: -0.35em;
+  color: var(--ink-lit-dimmer);
+}
+
+.shelf-btn:hover .eye { color: var(--accent-lit); }
+
+.shelf.hidden .shot-box { display: none; }
+/* An eye with a line through it, rather than the word `show`. The two
+   states are one drawing: the slash is in the markup and hidden, so the
+   eye never moves or reflows as it is struck through, and the label
+   beside it never shifts under the pointer that is about to click it. */
+.eye-slash { opacity: 0; }
+.shelf.hidden .eye-slash { opacity: 1; }
+.shelf.hidden .eye { color: var(--ink-lit-dimmer); }
+.shelf.hidden h4 { margin-bottom: 0; }
 
 #attach-row { display: flex; align-items: center; gap: 10px; }
 
@@ -123,31 +215,6 @@ h4 {
 #timer-note.asking { color: var(--ink-lit); }
 #timer-note:empty { display: none; }
 
-#group {
-  font-family: var(--head);
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--ink-lit);
-  margin-bottom: 3px;
-}
-
-#where {
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-lit-dim);
-}
-
-#dots { display: flex; gap: 6px; margin-top: 8px; }
-
-#dots span {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  box-shadow: inset 0 0 0 1px var(--ink-lit-dimmer);
-}
-
-#dots span.on { background: var(--accent-lit); box-shadow: none; }
-
 /* ---- the script, which is what this window is for -------------------- */
 
 #script {
@@ -157,8 +224,35 @@ h4 {
   padding-right: 8px;
 }
 
+/* The script's size is one number, set on the pane and read by every
+   rule under it, so the prose and a list in it can never be told apart
+   by a size that was raised in one place and not the other. The default
+   is the 19px this panel has always set. */
+#script { --script: 19px; }
+
+/* The two signs, set to be hit rather than read: the heading beside them
+   is 11px, which is a target nobody finds in a dark room, and a sign
+   carries at a size a word would not need. The label each one answers to
+   is on the button as aria-label, since a minus sign alone says nothing
+   to a screen reader. */
+.size-btn {
+  font-family: var(--mono);
+  font-size: 15px;
+  line-height: 1;
+  color: var(--ink-lit-dimmer);
+  background: none;
+  border: 1px solid var(--hairline-deep);
+  border-radius: 4px;
+  margin-left: 8px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.size-btn:hover { color: var(--ink-lit); border-color: var(--accent); }
+.size-btn[disabled] { opacity: 0.35; cursor: default; }
+
 #notes p {
-  font-size: 19px;
+  font-size: var(--script);
   line-height: 1.6;
   margin: 0 0 14px;
   color: var(--ink-lit-body);
@@ -177,7 +271,7 @@ h4 {
    is a way of reading one sentence faster, not a different voice. */
 #notes ul,
 #notes ol {
-  font-size: 19px;
+  font-size: var(--script);
   line-height: 1.6;
   margin: 0 0 14px;
   padding-left: 1.1em;
@@ -211,3 +305,23 @@ body.orphan:not(.live) #orphan { display: grid; }
    carries its direction with it; the notes are not the room, so nothing
    moves here. */
 .shot-box .slide { animation: none; }
+
+/* ---- a save that does not render ---------------------------------------
+   The error, over the script, until the next save renders. The previews
+   and the clock stay, being the last good copy. */
+#fault {
+  display: none;
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 4px;
+  background: var(--ground-panel);
+  color: var(--accent-lit);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow: auto;
+}
+body.fault #fault { display: block; }
+

@@ -4,6 +4,139 @@ Newest first, one line per thing somebody using sipario would notice.
 Every break is stated as a break: before 1.0 there is no major to spend,
 so a break ships as a minor and this file is the whole of the warning.
 
+## Unreleased
+
+- **Fixed:** the docked notes announced themselves as a window. Whether
+  the page is the dock's frame was decided after the first hello went
+  out, so a deck with popups allowed opened a blank window by name and
+  hid the dock. It is decided first now.
+- **Fixed:** the version cache missed the deck page. Only the notes page
+  went through it, so notes opened after a held save asked for a version
+  the server had never kept and got the latest instead. The deck page is
+  served through the cache too.
+- **Fixed:** notes opened after a save the deck was holding back showed
+  the file's latest, not the room's. The page now says which version it
+  was rendered at, the notes take their version from that, and a deck
+  reporting an earlier version is asked for by number: the server keeps
+  its last few renders and serves the one the room is seeing.
+- **Fixed:** a rename while the deck was in fullscreen left the notes
+  stationary. Staging the renamed page closed the old channel, which the
+  fullscreen deck was still driving on. The new channel is now opened
+  beside the old as a probe, and the notes move over only when a deck
+  there confirms the staged version.
+- **Fixed:** a rename could still lose the detached window. The renamed
+  deck's roll-call went unanswered when it loaded before its window had
+  moved channel. A window of its own now says so in its hello, and a deck
+  takes it back on either message, whichever comes first.
+- **Fixed:** the notes ran ahead of a deck in fullscreen. The deck holds a
+  save back while it is full screen; the notes took it at once, and read
+  the script of a slide the room could not see. The deck now reports the
+  version it is showing with every position, and the notes stage a fresh
+  page until the deck reaches it. Leaving fullscreen takes the held save
+  rather than dropping it.
+- **Fixed:** renaming a deck cut its notes off. The channel is named for
+  the deck, so the reloaded deck spoke on a channel the notes were not
+  on. A refreshed notes window now moves to the channel the fresh page
+  names, and the tab id and window name no longer carry the deck's name,
+  so the pairing and the reclaim survive the rename.
+- **Fixed:** a stylesheet added by a save was appended after the rest in
+  the notes, so two sheets of equal specificity could resolve the other
+  way round from the deck. Sheets are now placed in the fresh page's order.
+- **Fixed:** a save that did not render stranded a detached notes window.
+  The window reloaded into the server's error, a plain page with no
+  listener, so the save that fixed the deck never reached it. The error
+  is now shown inside the notes, over the script, with the previews and
+  the clock left as the last good copy, and the stream stays connected.
+- **Fixed:** a refreshed notes window kept its old stylesheets. The deck
+  was swapped in but the sheets were not, so a dress edited mid-rehearsal
+  left the previews in the old look. The sheets the fresh page carries are
+  fetched again, one it gained is added, one it dropped goes.
+- **Fixed:** reloading the deck lost its detached window. The window stayed
+  open but the deck came back with no handle to it and believed the notes
+  hidden, so P docked a second copy beside the deck: the script on the
+  shared screen. A reloaded deck now asks over the channel whether its
+  window is still there and, when it answers, takes it back by name.
+- **Fixed:** a deck with a fault in it took the server down at startup.
+  The listening callback rendered once for the banner and a render error
+  there was thrown out of the process, so the error page that exists for
+  exactly this state was never served. The failure is now logged and the
+  server stays up, serving the error until the next save.
+- **Fixed:** the error page reloaded itself for ever. The reload stream
+  sends its current token on connect and the page reloaded on every
+  message, that one included: connect, token, reload, connect. It now
+  keeps the first token and reloads only when a later one differs.
+- **Fixed:** an edited layered figure never reached the deck. The figure
+  cache was keyed by path and never emptied, so a save of an SVG reloaded
+  the page and the render was handed the old drawing for as long as the
+  server ran. The cache now checks the file's mtime on every read and
+  rereads a changed figure; an unchanged one is still served from memory.
+- **Fixed:** a detached notes window went stale after a save. It kept the
+  copy of the deck it loaded with and took only positions from the deck,
+  so after an edit every move landed on the right number and the wrong
+  script. It now listens for the same change the deck does, fetches its
+  page again and swaps the fresh deck in without reloading, so the clock
+  keeps running and the window stays put. The docked panel already
+  reloaded with the deck, being its iframe.
+- **Added:** `number-from: 0` in the deck's head counts the movements from
+  0 instead of 1. A talk whose first movement is an opening rather than a
+  beat had its beats one off from its slide numbers: beat three's section
+  slide, marked 3, was 4.1. The renderer, the id prefixes and `renumber`
+  all follow the key; anything but 0 or 1 stops the render.
+- **Added:** the notes carry the map, top right, lit where the deck is.
+  The position block was dropped from the notes earlier on the grounds
+  that the deck's compass and minimap carry it; that put it on the screen
+  behind the presenter, and turning round to find your place is what a
+  notes panel is for. Same shape as the deck's minimap, built from the
+  same groups. M, pressed on the deck or in the notes, shows or hides both.
+- **Added:** Shift with the up arrow returns to the head of the movement
+  you are in, from the deck or from the notes. Up alone reads back a step
+  at a time and left returns to wherever the *previous* movement was left,
+  so there was no way to restart the current one short of pressing up
+  until it stopped. The help overlay and the starters' keys slide list it.
+- **Fixed:** the notes now follow the deck window that opened them. The
+  channel is named for the talk, which keeps two different decks apart but
+  not two windows of the same one, and opening a deck twice is ordinary —
+  one on the projector, one on the laptop. Every deck window was
+  broadcasting its position to every panel, and each panel obeyed whichever
+  spoke last, so the notes beside a deck on slide 1.1 could be reading the
+  script for 2.3. Each window now carries an id, kept in `sessionStorage`
+  so it survives the live reload, and a panel listens only to the window
+  that opened it. A detached window also gets a name of its own, so a
+  second deck's detach opens its own window instead of reusing the first's.
+  A panel opened by hand at `/presenter` carries no id and still follows
+  any deck, which is the only useful thing it can do.
+- The next slide sits under the current one. The two previews are one
+  narrow column with the clock and the position beside them, and the
+  script runs the whole width underneath. Before, the previews sat apart,
+  one across the top and one down the side, which set the panel's width by
+  the wider of two pictures of slides the presenter has already seen.
+  Nothing about the layout is decided by width, so docked and detached
+  stay one arrangement.
+- The script can be made bigger or smaller, with <kbd>+</kbd> and
+  <kbd>-</kbd> or the two signs beside its heading, in seven steps from
+  15px to 35px. How far a lectern is from the eyes is a property of the
+  room rather than of the talk, so it is set in the room and remembered
+  per deck. The ends of the range say so rather than letting a press do
+  nothing.
+- The keys the notes own, <kbd>1</kbd>, <kbd>2</kbd>, <kbd>+</kbd> and
+  <kbd>-</kbd>, work from the deck window too: docked, the notes are an
+  iframe and the hands are on the deck. A detached window hears them
+  itself and is not sent a second copy.
+- The next slide's heading is gone from under its preview. The preview
+  is the slide, so the heading said the same thing twice in the panel
+  whose other half is the words to be read. The end of the talk says
+  itself: the box is empty.
+- The position is gone from the notes: no movement name, no slide
+  number, no dot per step. The deck's own compass and minimap carry it,
+  on the screen the presenter is already looking at, and this panel is
+  for the words. What is left beside the previews is the clock.
+- Either preview can be put away, by the eye beside its label or by
+  <kbd>1</kbd> and <kbd>2</kbd>, and the choice is remembered per deck.
+  With both away the rail shrinks to the clock and the script takes the
+  rest. The label stays whatever is hidden, so the way back is where the
+  way out was, and the eye is struck through rather than unlit, so which
+  state it is in can be read rather than inferred.
+
 ## 0.2.0 — 2026-09-05
 
 - The slides move. Press → and the slide you are on goes out to the

@@ -26,12 +26,15 @@ align: tight
 - (slate) `← →` Previous and next part of the talk
 - (slate) `↓ ↑` Next and previous step, then slide, within a part
 - (slate) `Home / End` First and last slide
+- (slate) `Shift ↑` Top of the current part
 - (slate) `P` Show or hide the notes beside the deck
 - (slate) `D` Move the notes to their own window, or bring them back
 - (slate) `A` In that window, put them back beside the deck
+- (slate) `1 / 2` In the notes, hide or show the current or the next slide
+- (slate) `+ / -` In the notes, a bigger or a smaller script
 - (slate) `O` Overview of every slide; the arrows move the selection
 - (slate) `Enter` In the overview, show the selected slide
-- (slate) `M` A map of the talk in the corner, marking where you are
+- (slate) `M` A map of the talk in the corner, here and in the notes, marking where you are
 - (slate) `F` Full screen
 - (slate) `C` Check every slide for content running off the stage
 - (slate) `R` Back to the start, forgetting where each movement was left

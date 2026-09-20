@@ -130,7 +130,10 @@ Ids and numbers are **declared and then verified, never derived.** The
 anchor is a name you chose rather than a slug that moves when you rewrite
 a heading, and a number that disagrees with where the slide actually sits
 stops the render and names both. `npx sipario renumber talk/deck.md`
-rewrites them from position.
+rewrites them from position. Movements count from 1 unless the deck's head
+says `number-from: 0`, for a talk whose first movement is an opening
+rather than a beat: then beat three is 3.x on every slide, and the number
+on its section slide is the number in the corner.
 
 Everything that can go wrong stops the render and says what is wrong: a
 `>` standfirst on a slide whose template never prints one, a step
@@ -151,6 +154,8 @@ template: [`docs/TEMPLATES.md`](docs/TEMPLATES.md).
 | <kbd>M</kbd> | the minimap, on by default: the talk's shape in the corner, the slide you are on lit |
 | <kbd>P</kbd> | the notes, docked beside the deck |
 | <kbd>D</kbd> | the notes, in a window of their own, and back |
+| <kbd>1</kbd> <kbd>2</kbd> | in the notes, hide or show the current or the next slide, and give the room back to the script |
+| <kbd>+</kbd> <kbd>-</kbd> | in the notes, a bigger or a smaller script, for how far the lectern is from your eyes |
 | <kbd>T</kbd> | the clock: start, pause, then reset |
 | <kbd>R</kbd> | forget where each movement was left |
 | <kbd>C</kbd> | measure every step against the stage and name what overflows |

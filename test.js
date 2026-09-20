@@ -931,6 +931,24 @@ check('a movement never visited opens at its first slide', () => {
   eq(n(), '3.1', 'the third movement opens at its top');
 });
 
+check('Shift and up returns to the top of the movement you are in', () => {
+  const { window, doc, current, key, forget } = MOVES;
+  const n = () => current().dataset.n;
+  const top = () => doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowUp', shiftKey: true }));
+  forget();
+  key('ArrowRight');                         // 2.1
+  key('ArrowDown'); key('ArrowDown');        // 2.2, mid-build
+  top();
+  eq(n(), '2.1', 'back at the head of the second movement');
+  eq(current().dataset.enter, 'up', 'arriving from above, as a move back within a part does');
+  top();
+  eq(n(), '2.1', 'and from the head it stays put');
+  key('ArrowDown');
+  eq(n(), '2.2', 'reading on goes down from the head, not to where the movement was left');
+  key('ArrowLeft'); key('ArrowRight');
+  eq(n(), '2.2', 'the mark is the last place shown, so left and right still return there');
+});
+
 check('R forgets the marks, and asks before it does', () => {
   const { window, doc, current, key, forget } = MOVES;
   const n = () => current().dataset.n;
@@ -1148,6 +1166,40 @@ check('every slide declares its number, and it is right', () => {
   eq(parsed[parsed.length - 1].meta.slide, '4.1', 'the close declares 4.1');
 });
 
+check('number-from: 0 counts the movements from the opening', () => {
+  /* A talk whose first movement is an opening rather than a beat can
+     number it 0, so that beat three is 3.x on every slide and on its
+     section mark alike. The numbers and the id prefixes both follow. */
+  const { render, parse, grouped, checkNumbers, checkDeclaredIds, identity } = require('./lib/render.js');
+  let src = MOVES_SRC.replace('name: Moves', 'name: Moves\nnumber-from: 0');
+  for (let n = 1; n <= 3; n++) {                   // ascending, so 2 -> 1 never re-hits a fresh 1
+    src = src.replace(new RegExp(`^## ${n}\\.`, 'mg'), `## ${n - 1}.`)
+             .replace(new RegExp(`^id: ${n}-`, 'mg'), `id: ${n - 1}-`);
+  }
+  eq(identity(src).from, 0, 'the head says where to count from');
+  const groups = grouped(parse(src));
+  checkNumbers(groups, 0);
+  checkDeclaredIds(groups, 0);
+  const html = render(src, TALK).html;
+  const ns = [...html.matchAll(/<div class="stack" data-steps="\d+" data-n="([^"]+)"/g)].map((m) => m[1]);
+  eq(ns[0], '0.1', 'the opening is 0.1');
+  eq(ns[1], '1.1', 'and the second movement is 1.x');
+  eq(/<section class="group" data-group="Title" data-section="0">/.test(html), true,
+     'the movement carries its number too');
+  eq(/id="0-three-movements"/.test(html), true, 'ids open with the same number');
+
+  /* Declared numbers that still count from 1 are wrong under the key. */
+  let threw = null;
+  try { render(MOVES_SRC.replace('name: Moves', 'name: Moves\nnumber-from: 0'), TALK); } catch (e) { threw = e; }
+  if (!threw || !/declared 1.1, is actually 0.1/.test(threw.message)) {
+    throw new Error(`a deck numbered from 1 under number-from: 0 should stop: ${threw && threw.message}`);
+  }
+  /* The key takes 0 or 1 and nothing else. */
+  threw = null;
+  try { identity('name: X\nnumber-from: 2\n\n# A'); } catch (e) { threw = e; }
+  if (!threw || !/number-from is 2/.test(threw.message)) throw new Error('number-from: 2 was accepted');
+});
+
 check('a wrong declared number stops the render', () => {
   const src = fs.readFileSync(TALK.deck, 'utf8')
     .replace('## 3.5 ', '## 3.50 ');
@@ -1178,30 +1230,34 @@ check('a `##` line with no number stops the render', () => {
 /* A BroadcastChannel the two windows share, so the protocol between them
  * is what is under test rather than the browser's implementation of it. */
 function makeBus() {
+  /* Named, as the real one is: a message reaches the peers on the same
+     name and no other, which is what a rename turns on. */
   const peers = [];
-  return function Channel() {
+  return function Channel(name) {
+    this.name = name;
     this.onmessage = null;
     this.onmessageerror = null;
-    this.close = () => {};
+    this.close = () => { const i = peers.indexOf(this); if (i > -1) peers.splice(i, 1); };
     this.postMessage = (data) => {
-      for (const p of peers) if (p !== this && p.onmessage) p.onmessage({ data });
+      for (const p of peers) if (p !== this && p.name === this.name && p.onmessage) p.onmessage({ data });
     };
     peers.push(this);
   };
 }
 
-function windowFor(body, scripts, Bus) {
+function windowFor(body, scripts, Bus, url, before) {
   const errs = [];
   const con = new VirtualConsole();
   con.on('jsdomError', (e) => errs.push(e));
   const d = new JSDOM(`<!doctype html><html><head><style>${css}</style></head><body>${body}</body></html>`,
     { runScripts: 'outside-only', pretendToBeVisual: true,
-      url: 'http://localhost:9999/', virtualConsole: con });
+      url: url || 'http://localhost:9999/', virtualConsole: con });
   d.window.BroadcastChannel = Bus;
   d.window.EventSource = function () { this.close = () => {}; };
   d.window.open = () => ({ closed: false, focus() {}, close() { this.closed = true; } });
   Object.defineProperty(d.window, 'innerWidth', { value: 1600, configurable: true });
   Object.defineProperty(d.window, 'innerHeight', { value: 900, configurable: true });
+  if (before) before(d.window);                    // e.g. seed storage, as a reload would find it
   for (const src of scripts) d.window.eval(src);
   if (errs.length) throw new Error(errs[0].detail || errs[0].message);
   return d.window;
@@ -1212,12 +1268,19 @@ const deckBody = `${MOVES_MAIN}
   <div id="progress"><div id="progress-bar"></div></div>`;
 const presenterBody = `${MOVES_MAIN}
   <div id="wrap">
-    <div class="shot-box" id="now"></div>
-    <div id="attach-row"><button id="attach-btn"></button><span id="attach-note"></span></div>
-    <div id="clock">00:00</div><button id="timer-btn"></button><p id="timer-note"></p>
-    <div id="group"></div><div id="where"></div><div id="dots"></div>
-    <div class="shot-box" id="next"></div><p id="next-label"></p>
-    <div id="notes"></div>
+    <div class="shelf" id="now-shelf"><h4><button class="shelf-btn" id="now-btn"></button></h4>
+      <div class="shot-box" id="now"></div></div>
+    <div class="pane" id="side">
+      <div id="attach-row"><button id="attach-btn"></button><span id="attach-note"></span></div>
+      <div id="clock">00:00</div><button id="timer-btn"></button><p id="timer-note"></p>
+    </div>
+    <div class="shelf" id="next-shelf"><h4><button class="shelf-btn" id="next-btn"></button></h4>
+      <div class="shot-box" id="next"></div></div>
+    <div class="pane" id="script"><h4>Script
+      <button class="size-btn" id="smaller-btn"></button>
+      <button class="size-btn" id="bigger-btn"></button></h4>
+      <div id="notes"></div></div>
+    <pre id="fault"></pre>
   </div><div id="orphan"></div>`;
 
 let deckWin, presWin, BUS;
@@ -1242,11 +1305,6 @@ check('the presenter window runs and follows the deck', () => {
      'script shown');
 });
 
-check('the presenter shows where the deck is', () => {
-  const where = presWin.document.getElementById('where').textContent;
-  if (!/Slide 1\.1/.test(where)) throw new Error(`reads "${where}"`);
-});
-
 check('the presenter window drives the deck', () => {
   /* Right, not down: the deck opens on Title, which holds one slide of
      one step, so down there correctly does nothing. */
@@ -1264,9 +1322,44 @@ check('moving the deck updates the presenter', () => {
   const last = deckWin.document.querySelector('.slide.current');
   eq(presWin.document.getElementById('notes').textContent.trim().slice(0, 40),
      last.querySelector('.notes').textContent.trim().slice(0, 40), 'script at the end');
-  if (!/Slide 3\.1/.test(presWin.document.getElementById('where').textContent)) {
-    throw new Error('position did not follow to the last slide');
+  /* With the position line gone, the preview is what says the panel
+     followed: it is the real slide, so a stale one would be the last
+     slide's words over the previous slide's picture. */
+  const shot = presWin.document.querySelector('#now .slide.shot');
+  if (!shot || shot.id !== last.id) {
+    throw new Error('the preview did not follow to the last slide');
   }
+});
+
+check('a second deck window does not drive the first one\'s notes', () => {
+  /* The channel is named for the talk, so two windows of the *same* talk
+     share it. Before the panel knew which window opened it, every deck
+     broadcast its position to every panel and each panel obeyed whichever
+     spoke last: open the deck twice and the notes beside one window showed
+     the script for the slide the other was on. Reproduced 2026-09-19 from
+     a deck on 1.1 whose panel was reading 2.3. */
+  const bus = makeBus();
+  const deckA = windowFor(deckBody, [js], bus);
+  const id = deckA.document.getElementById('deck').getAttribute('data-deck');
+  const tabA = deckA.sessionStorage.getItem('notes-tab');
+  if (!tabA) throw new Error('the deck window took no id of its own');
+
+  const panelA = windowFor(presenterBody, [presenterJs], bus,
+    'http://localhost:9999/presenter?tab=' + tabA);
+
+  deckA.document.dispatchEvent(new deckA.KeyboardEvent('keydown', { key: 'End' }));
+  const mine = deckA.document.querySelector('.slide.current');
+  const shown = () => panelA.document.getElementById('notes').textContent.trim().slice(0, 40);
+  eq(shown(), mine.querySelector('.notes').textContent.trim().slice(0, 40),
+     'the panel follows the window that opened it');
+
+  /* A second window of the same talk, which publishes where it is as it
+     starts. Its id differs, so this panel must not move. */
+  const deckB = windowFor(deckBody, [js], bus);
+  const tabB = deckB.sessionStorage.getItem('notes-tab');
+  if (tabB === tabA) throw new Error('two deck windows took the same id');
+  eq(shown(), mine.querySelector('.notes').textContent.trim().slice(0, 40),
+     'a second deck window moved the first one\'s notes');
 });
 
 check('the presenter previews the real slide, not a copy of it', () => {
@@ -1278,11 +1371,207 @@ check('the presenter previews the real slide, not a copy of it', () => {
      deckWin.document.querySelector('.slide.current h1').textContent, 'preview heading');
 });
 
-check('the presenter names the group it is in', () => {
-  eq(presWin.document.getElementById('group').textContent, '1  Title', 'group at slide 1');
-  deckWin.document.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'End' }));
-  eq(presWin.document.getElementById('group').textContent, '3  Close', 'group at the end');
-  deckWin.document.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'Home' }));
+check('the notes carry the map, lit where the deck is', () => {
+  BUS = makeBus();
+  deckWin = windowFor(deckBody, [js], BUS);
+  const p = newPresenter();
+  const d = deckWin.document;
+  const map = p.document.getElementById('notes-map');
+  if (!map) throw new Error('no map in the notes');
+  eq(map.parentNode.id, 'side', 'in the side column');
+  eq(map.parentNode.firstChild, map, 'at its top');
+  eq(map.querySelectorAll('.mm-col').length, d.querySelectorAll('#minimap .mm-col').length,
+     'a column per movement, as on the deck');
+  eq(map.querySelectorAll('.mm-cell').length, d.querySelectorAll('#minimap .mm-cell').length,
+     'and a cell per slide');
+  const lit = () => { const c = map.querySelector('.mm-cell.on'); return c && c.dataset.g + '.' + c.dataset.s; };
+  eq(lit(), '0.0', 'lit at the start');
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'ArrowRight' }));
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'ArrowDown' }));
+  eq(lit(), '1.1', 'and it follows the deck');
+  eq(map.querySelectorAll('.mm-cell.on').length, 1, 'one cell lit, not two');
+
+  /* M governs both maps, from either window. */
+  const shown = () => !map.classList.contains('hidden');
+  const deckShown = () => d.body.classList.contains('minimap');
+  eq(shown() && deckShown(), true, 'both maps showing to begin with');
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'm' }));
+  eq(deckShown(), false, 'M on the deck hides its map');
+  eq(shown(), false, 'and the notes\' map with it');
+  p.document.dispatchEvent(new p.KeyboardEvent('keydown', { key: 'm' }));
+  eq(deckShown(), true, 'M in the notes brings the deck\'s back');
+  eq(shown(), true, 'and its own');
+});
+
+check('a detached window takes a fresh deck without reloading', () => {
+  /* A save reloads the deck window but not a detached one, which kept the
+     copy it loaded with. The window fetches its page again and swaps the
+     deck in, keeping its place and its clock. */
+  BUS = makeBus();
+  deckWin = windowFor(deckBody, [js], BUS);
+  const p = newPresenter();
+  const d = deckWin.document;
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'ArrowRight' }));
+  const before = p.document.getElementById('notes').textContent.trim();
+  const cells = p.document.querySelectorAll('#notes-map .mm-cell').length;
+
+  const edited = MOVES_SRC
+    .replace('The section opens the second movement.', 'The section, rewritten, opens the second movement.')
+    .replace('\n# Close', '\n## 2.5 Added\nid: 2-added\ntemplate: statement\n\nA slide that was not there.\n\n```notes\nNew.\n```\n\n# Close');
+  const fresh = render(edited, TALK);
+  eq(p.__refresh(`<html><body><main id="deck" data-deck="${fresh.deck.key}">${fresh.html}</main></body></html>`), true, 'refreshed');
+  const after = p.document.getElementById('notes').textContent.trim();
+  if (after === before) throw new Error('the script did not change');
+  if (!/rewritten/.test(after)) throw new Error(`the script is not the new one: ${after.slice(0, 60)}`);
+  eq(p.document.querySelectorAll('#notes-map .mm-cell').length, cells + 1, 'the map grew a cell for the new slide');
+  eq(p.document.querySelector('#notes-map .mm-cell.on').dataset.g, '1', 'and still lights the movement the deck is on');
+  eq(p.document.getElementById('clock').textContent, '00:00', 'the clock was left alone');
+});
+
+check('a save that does not render shows its fault in the notes, and the next one clears it', () => {
+  BUS = makeBus();
+  deckWin = windowFor(deckBody, [js], BUS);
+  const p = newPresenter();
+  const before = p.document.getElementById('notes').textContent.trim();
+  eq(p.__refresh('deck.md slide numbering is out of step:\n  declared 3.50, is actually 3.5', false), false, 'refused');
+  eq(p.document.body.classList.contains('fault'), true, 'the fault is shown');
+  if (!/declared 3.50/.test(p.document.getElementById('fault').textContent)) throw new Error('without the message');
+  eq(p.document.getElementById('notes').textContent.trim(), before, 'the last good script stays');
+  eq(p.__refresh(`<html><body><main id="deck">${MOVES_DECK.html}</main></body></html>`), true, 'the next save renders');
+  eq(p.document.body.classList.contains('fault'), false, 'and the fault is gone');
+});
+
+check('the notes wait for the deck\'s version, so fullscreen holds them back too', () => {
+  BUS = makeBus();
+  deckWin = windowFor(deckBody, [js], BUS);
+  const p = newPresenter();
+  const fake = new BUS('sipario:moves');                   // a deck that reports versions
+  const at = (v) => fake.postMessage({ from: 'deck', type: 'state', g: 0, s: 0, y: 0, v });
+  at('100');
+  const before = p.document.getElementById('notes').textContent.trim();
+  const edited = MOVES_SRC.replace('The first movement holds one slide.', 'The first movement, rewritten.');
+  const page = `<html><body><main id="deck" data-deck="sipario:moves" data-version="101">${render(edited, TALK).html}</main></body></html>`;
+  p.__stage('101', page, true);                            // the stream said so, the fetch came back
+  eq(p.document.getElementById('notes').textContent.trim(), before, 'staged, not applied: the deck is still on 100');
+  at('100');
+  eq(p.document.getElementById('notes').textContent.trim(), before, 'and stays so while the deck holds the save');
+  at('101');
+  if (!/rewritten/.test(p.document.getElementById('notes').textContent)) throw new Error('not applied once the deck reached 101');
+});
+
+check('a renamed deck keeps its notes: the window moves to the new channel', () => {
+  BUS = makeBus();
+  deckWin = windowFor(deckBody, [js], BUS);
+  const p = newPresenter();
+  const opened = [];
+  const Real = p.BroadcastChannel;
+  p.BroadcastChannel = function (name) { opened.push(name); return new Real(name); };
+  const renamed = render(MOVES_SRC.replace('name: Moves', 'name: Moves Renamed'), TALK);
+  const page = `<html><body><main id="deck" data-deck="${renamed.deck.key}" data-version="7">${renamed.html}</main></body></html>`;
+  /* Staged on the stream's word: the new channel is opened beside the old
+     one, and the old one still drives, since a deck in fullscreen is
+     still on it. */
+  p.__stage('7', page, true);
+  eq(opened.join(), 'sipario:moves-renamed', 'a channel under the new name was opened on staging');
+  eq(p.document.getElementById('deck').getAttribute('data-deck'), 'sipario:moves', 'the copy waits for the deck');
+  deckWin.document.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'ArrowRight' }));
+  eq(p.document.querySelector('#notes-map .mm-cell.on').dataset.g, '1', 'the deck on the old channel still drives');
+  /* The renamed deck confirms on the new channel: the copy is taken and
+     the window moves over, and the old channel is left behind. */
+  const fresh = new BUS('sipario:moves-renamed');
+  fresh.postMessage({ from: 'deck', type: 'state', g: 2, s: 0, y: 0, v: '7' });
+  eq(p.document.getElementById('deck').getAttribute('data-deck'), 'sipario:moves-renamed', 'taken when the deck confirms');
+  eq(p.document.querySelector('#notes-map .mm-cell.on').dataset.g, '2', 'and on the new deck\'s position');
+  deckWin.document.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'ArrowLeft' }));
+  eq(p.document.querySelector('#notes-map .mm-cell.on').dataset.g, '2', 'the old channel no longer drives');
+});
+
+check('notes opened after a held save take their version from the page, and ask for the deck\'s', () => {
+  BUS = makeBus();
+  deckWin = windowFor(deckBody, [js], BUS);
+  /* The page was rendered at 5; the deck, in fullscreen, is showing 4. */
+  const p = windowFor(presenterBody.replace('<main id="deck"', '<main id="deck" data-version="5"'), [presenterJs], BUS);
+  const asked = [];
+  p.fetch = (url) => { asked.push(url); return new Promise(() => {}); };
+  const fake = new BUS('sipario:moves');
+  fake.postMessage({ from: 'deck', type: 'state', g: 0, s: 0, y: 0, v: '4' });
+  eq(asked.length, 1, 'the deck\'s version was asked for');
+  if (!/[?&]v=4$/.test(asked[0])) throw new Error(`asked for the wrong thing: ${asked[0]}`);
+  /* What comes back says which version it is, and that is what is applied. */
+  const older = render(MOVES_SRC.replace('The first movement holds one slide.', 'The first movement, as the room sees it.'), TALK);
+  p.__stage('4', `<html><body><main id="deck" data-deck="sipario:moves" data-version="4">${older.html}</main></body></html>`, true);
+  if (!/as the room sees it/.test(p.document.getElementById('notes').textContent)) throw new Error('the room\'s version was not applied');
+});
+
+check('a hello from a detached window lets a reloaded deck take it back, whichever loads first', () => {
+  BUS = makeBus();
+  const first = windowFor(deckBody, [js], BUS);
+  first.document.dispatchEvent(new first.KeyboardEvent('keydown', { key: 'd' }));
+  const tab = first.sessionStorage.getItem('notes-tab');
+  /* The deck reloads before its window has moved to the channel: the
+     roll-call is unanswered. */
+  deckWin = windowFor(deckBody, [js], BUS, undefined, (w) => w.sessionStorage.setItem('notes-tab', tab));
+  eq(deckWin.__detached(), false, 'nobody answered the roll-call');
+  presWin = windowFor(presenterBody, [presenterJs], BUS, 'http://localhost:9999/presenter?tab=' + tab);
+  eq(deckWin.__detached(), true, 'the window\'s hello let the deck take it back');
+  deckWin.document.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
+  eq(deckWin.document.body.classList.contains('docked'), false, 'so P hides rather than docking a second copy');
+});
+
+check('the dock says it is not a window, from its first word', () => {
+  /* `inFrame` was decided after the first hello went out, so the dock
+     announced itself as a window: a deck with popups allowed opened a
+     blank window by name and hid the dock. */
+  BUS = makeBus();
+  const heard = [];
+  const spy = new BUS('sipario:moves');
+  spy.onmessage = (e) => { if (e.data.from === 'presenter' && e.data.type === 'hello') heard.push(e.data); };
+  windowFor(presenterBody, [presenterJs], BUS, 'http://localhost:9999/presenter?tab=abc',
+    (w) => Object.defineProperty(w, 'parent', { value: {}, configurable: true }));   // framed
+  eq(heard.length, 1, 'the dock said hello');
+  eq(heard[0].detached, false, 'and not as a window');
+  windowFor(presenterBody, [presenterJs], BUS, 'http://localhost:9999/presenter?tab=abc');
+  eq(heard.length, 2, 'a window of its own said hello');
+  eq(heard[1].detached, true, 'and as a window');
+});
+
+check('a refresh brings the stylesheets with it', () => {
+  BUS = makeBus();
+  deckWin = windowFor(deckBody, [js], BUS);
+  const p = newPresenter();
+  const head = p.document.head;
+  const add = (href) => { const l = p.document.createElement('link'); l.rel = 'stylesheet'; l.href = href; head.appendChild(l); };
+  add('/templates/kept.css'); add('/templates/dropped.css');
+  const page = `<html><head><link rel="stylesheet" href="/templates/kept.css"><link rel="stylesheet" href="/templates/added.css"></head>` +
+    `<body><main id="deck">${MOVES_DECK.html}</main></body></html>`;
+  eq(p.__refresh(page), true, 'refreshed');
+  const hrefs = [...head.querySelectorAll('link[rel="stylesheet"]')].map((l) => l.getAttribute('href'));
+  if (!hrefs.some((h) => /^\/templates\/kept\.css\?v=\d+$/.test(h))) throw new Error(`kept.css was not fetched again: ${hrefs}`);
+  if (!hrefs.some((h) => /^\/templates\/added\.css\?v=\d+$/.test(h))) throw new Error(`added.css was not added: ${hrefs}`);
+  if (hrefs.some((h) => /dropped\.css/.test(h))) throw new Error(`dropped.css was kept: ${hrefs}`);
+  /* In the fresh page's order: an added sheet is not simply appended. */
+  add('/templates/z.css');
+  const ordered = `<html><head><link rel="stylesheet" href="/templates/a.css"><link rel="stylesheet" href="/templates/z.css"></head>` +
+    `<body><main id="deck">${MOVES_DECK.html}</main></body></html>`;
+  p.__refresh(ordered);
+  const order = [...head.querySelectorAll('link[rel="stylesheet"]')].map((l) => l.getAttribute('href').split('?')[0]);
+  eq(order.join(), '/templates/a.css,/templates/z.css', 'a.css before z.css, as the deck has them');
+});
+
+check('a reloaded deck takes its detached window back before P can dock a second copy', () => {
+  BUS = makeBus();
+  const first = windowFor(deckBody, [js], BUS);
+  first.document.dispatchEvent(new first.KeyboardEvent('keydown', { key: 'd' }));
+  eq(first.__detached(), true, 'the first deck detached its notes');
+  const tab = first.sessionStorage.getItem('notes-tab');
+  presWin = windowFor(presenterBody, [presenterJs], BUS, 'http://localhost:9999/presenter?tab=' + tab);
+  /* The deck reloads: a new window with the same tab id, the notes still
+     open. It asks on the way in, and takes the window back. */
+  deckWin = windowFor(deckBody, [js], BUS, undefined, (w) => w.sessionStorage.setItem('notes-tab', tab));
+  eq(deckWin.__detached(), true, 'the reloaded deck has its window back');
+  deckWin.document.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
+  eq(deckWin.document.body.classList.contains('docked'), false, 'P did not dock a second copy');
+  eq(deckWin.__detached(), false, 'it hid the notes, which is what P does when they show');
 });
 
 check('the notes are off until asked for', () => {
@@ -1304,8 +1593,12 @@ check('P docks the notes, and they are the presenter page itself', () => {
   eq(d.body.classList.contains('docked'), true, 'docked after P');
   const frame = d.getElementById('dock-frame');
   if (!frame) throw new Error('no iframe in the dock');
-  eq(frame.getAttribute('src'), '/presenter',
+  const src = frame.getAttribute('src');
+  eq(src.split('?')[0], '/presenter',
      'the dock shows the presenter page, so the two cannot drift apart');
+  if (!/[?&]tab=[^&]+/.test(src)) {
+    throw new Error('the dock was not told which deck window owns it: ' + src);
+  }
   d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
   eq(d.body.classList.contains('docked'), false, 'P again hides them');
 });
@@ -1467,8 +1760,108 @@ check('the notes are one layout, not two', () => {
   if (layoutSwitch.length) {
     throw new Error(`a media query changes the notes layout:\n${layoutSwitch[0].slice(0, 120)}`);
   }
-  eq(/#wrap \{[^}]*grid-template-columns:\s*1fr minmax\(/.test(pcss), true,
+  eq(/#wrap \{[^}]*grid-template-columns:\s*minmax\([^)]*\) 1fr/.test(pcss), true,
      'the rail shrinks with the panel rather than sitting at a fixed width');
+  /* The script runs the whole width under both columns, so a rule that
+     confined it to one would halve the only thing on this page that has
+     to be read while talking. */
+  eq(/#script \{[^}]*grid-column:\s*1 \/ -1/.test(pcss), true,
+     'the script runs the full width, under the previews and the clock');
+});
+
+check('either preview can be put away, and the choice is remembered', () => {
+  /* The rail is there to be glanced at and the script is there to be
+     read, so a presenter who wants neither picture should get the space
+     back. Hiding must survive the next slide, or it would undo itself
+     the moment the talk moved. */
+  const p = newPresenter();
+  const shelf = (n) => p.document.getElementById(n + '-shelf').classList.contains('hidden');
+
+  eq(shelf('now'), false, 'both previews start showing');
+  p.document.getElementById('now-btn').click();
+  eq(shelf('now'), true, 'the button put the current slide away');
+  eq(shelf('next'), false, 'and left the next one alone');
+
+  p.document.dispatchEvent(new p.KeyboardEvent('keydown', { key: '2' }));
+  eq(shelf('next'), true, 'the key put the next slide away too');
+
+  /* Moving the deck repaints, which is where a hidden shelf would come
+     back if paint() decided what is showing. */
+  deckWin.document.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'ArrowDown' }));
+  eq(shelf('now'), true, 'still hidden after the deck moved');
+
+  /* Each jsdom window gets its own storage, so what a second window
+     would read is checked where it is written rather than by opening
+     one. */
+  const key = [...Object.keys(p.localStorage)].find((k) => k.endsWith(':shelves'));
+  eq(!!key, true, 'the choice was written down');
+  eq(key.startsWith('sipario:'), true, 'under this deck\'s own key, not a shared one');
+  const kept = JSON.parse(p.localStorage.getItem(key));
+  eq(kept.now && kept.next, true, 'both are remembered as put away');
+
+  p.document.getElementById('now-btn').click();
+  eq(shelf('now'), false, 'and the same button brings it back');
+});
+
+check('the script can be made bigger and smaller, and the size is kept', () => {
+  /* How far a lectern is from the eyes is a property of the room, not of
+     the talk, so this is set in the room and remembered for the next
+     time the same deck is opened. */
+  const p = newPresenter();
+  const size = () => p.document.getElementById('script').style.getPropertyValue('--script');
+
+  const first = size();
+  eq(/px$/.test(first), true, `a size is set, read "${first}"`);
+  p.document.getElementById('bigger-btn').click();
+  const bigger = parseInt(size(), 10);
+  eq(bigger > parseInt(first, 10), true, 'bigger is bigger');
+
+  p.document.dispatchEvent(new p.KeyboardEvent('keydown', { key: '-' }));
+  eq(size(), first, 'and the key puts it back');
+
+  const key = [...Object.keys(p.localStorage)].find((k) => k.endsWith(':script'));
+  eq(!!key, true, 'the size was written down, under this deck\'s own key');
+
+  /* The ends of the range say so rather than letting a press do nothing:
+     a live-looking button that answers nothing reads as broken. */
+  for (let i = 0; i < 12; i++) p.document.getElementById('bigger-btn').click();
+  eq(p.document.getElementById('bigger-btn').disabled, true, 'the top of the range is said');
+  for (let i = 0; i < 12; i++) p.document.getElementById('smaller-btn').click();
+  eq(p.document.getElementById('smaller-btn').disabled, true, 'and the bottom');
+  eq(p.document.getElementById('bigger-btn').disabled, false, 'the other way is still open');
+
+  /* Back to where the suite found it, since the store outlives this
+     window and the checks after it read the same key. */
+  for (let i = 0; i < 12; i++) p.document.getElementById('bigger-btn').click();
+  while (size() !== first) p.document.getElementById('smaller-btn').click();
+});
+
+check('the deck hands the notes their own keys, and only while they show', () => {
+  /* Docked, the notes are an iframe and the hands are on the deck
+     window, so a key the notes own has to travel. Detached, the notes
+     hear it themselves, and a forwarded copy would toggle it twice. */
+  const src = fs.readFileSync(path.join(ROOT, 'js/deck.js'), 'utf8');
+  const fwd = src.match(/type: "panel"[\s\S]{0,80}/);
+  if (!fwd) throw new Error('the deck forwards nothing to the notes');
+  const block = src.slice(Math.max(0, src.indexOf(fwd[0]) - 320), src.indexOf(fwd[0]) + 80);
+  eq(/notesShowing\(\)/.test(block), true, 'it forwards only while the notes show');
+  eq(/detached\(\)/.test(block), true, 'and not to a window that hears the key itself');
+});
+
+check('a hidden preview is a hidden picture, never a hidden label', () => {
+  /* A control that removes itself leaves the way back nowhere to be
+     found, which is how a hidden panel becomes a lost feature. */
+  const pcss = fs.readFileSync(path.join(ROOT, 'css/presenter.css'), 'utf8');
+  eq(/\.shelf\.hidden \.shot-box/.test(pcss), true, 'hiding reaches the preview');
+  eq(/\.shelf\.hidden h4\s*\{[^}]*display:\s*none/.test(pcss), false,
+     'the label stays on the page when the preview goes');
+  /* The control is an icon now, so the state has to be drawn rather than
+     spelled: an eye that looks the same either way is a switch nobody
+     can read. */
+  eq(/\.shelf\.hidden \.eye-slash\s*\{[^}]*opacity:\s*1/.test(pcss), true,
+     'a put-away preview is struck through, not just unlit');
+  const page = fs.readFileSync(path.join(ROOT, 'lib/pages.js'), 'utf8');
+  eq(/class="eye-slash"/.test(page), true, 'the slash is in the markup, so nothing reflows on a press');
 });
 
 check('the notes are never docked and detached at once', () => {
@@ -1518,6 +1911,31 @@ check('the same folder is read and compiled once', () => {
   if (load(TALK.templateRoot, FILTERS) !== load(TALK.templateRoot, FILTERS)) {
     throw new Error('asking twice re-read the folder');
   }
+});
+
+check('an edited figure reaches the next render', () => {
+  /* The figure cache is keyed by path and checked against the file's
+     mtime. It used to be keyed by path alone and never emptied, so a
+     drawing edited while the server ran never reached the deck: the save
+     reloaded the page and the render was handed the old figure. */
+  const os = require('os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sipario-figure-'));
+  fs.cpSync(path.join(ROOT, 'starters/minimal'), dir, { recursive: true });
+  const t = talk(dir);
+  const svgPath = path.join(dir, 'images/in-layers.svg');
+  const src = D + layered('source, output', '\n--\n\n```notes\ntwo\n```\n\n--\n\n```notes\nthree\n```');
+  const first = render(src, t).html;
+  if (/data-edited/.test(first)) throw new Error('the marker is there before the edit');
+
+  const svg = fs.readFileSync(svgPath, 'utf8').replace('<g class="layer" data-layer="source"', '<g class="layer" data-layer="source" data-edited="yes"');
+  if (!/data-edited/.test(svg)) throw new Error('the harness figure has no source layer to mark');
+  fs.writeFileSync(svgPath, svg);
+  const later = new Date(Date.now() + 5000);
+  fs.utimesSync(svgPath, later, later);                 // a same-tick save must still count
+
+  const second = render(src, t).html;
+  if (!/data-edited="yes"/.test(second)) throw new Error('the render came back with the old figure');
+  eq(render(src, t).html, second, 'and the unchanged file is served from the cache again');
 });
 
 check('two talks load their templates apart', () => {
@@ -1944,6 +2362,18 @@ check('renumber agrees with the renderer, and rewrites nothing that is right', (
   if (fs.readFileSync(tmp, 'utf8') !== deckSrc) {
     throw new Error('renumber rewrote a deck that was already correct');
   }
+});
+
+check('renumber honours number-from: 0', () => {
+  const os = require('os');
+  const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'renumber-')), 'deck.md');
+  fs.writeFileSync(tmp, MOVES_SRC.replace('name: Moves', 'name: Moves\nnumber-from: 0'));
+  require('child_process').execFileSync('node', [path.join(ROOT, 'bin/sipario-renumber.js'), tmp], { encoding: 'utf8' });
+  const out = fs.readFileSync(tmp, 'utf8');
+  eq(/^## 0\.1 /m.test(out), true, 'the first slide became 0.1');
+  eq(/^id: 0-three-movements$/m.test(out), true, 'and its id prefix followed');
+  eq(/^## 1\.1\b/m.test(out), true, 'the second movement is 1.x');
+  render(out, TALK);                       // and the renderer agrees
 });
 
 check('renumber with no deck named says so rather than guessing', () => {
@@ -2413,6 +2843,103 @@ check('the server notices a save that replaces the file, not only one that rewri
   fs.rmSync(dir, { recursive: true, force: true });
   eq(status, 0, `the probe exited cleanly (${stderr.trim()})`);
   eq(JSON.parse(stdout.trim().split('\n').pop()), 3, 'three replacing saves are three reloads');
+});
+
+check('a deck that does not render yet is served as its error, and the server stays up', () => {
+  /* The listening callback rendered once for the banner, and a deck with a
+     fault in it threw there, out of the process. A deck being written is
+     in that state half the time; the page shows the error and reloads on
+     the next save, and both need a server to be there. */
+  const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-broken-'));
+  fs.cpSync(TALK.dir, dir, { recursive: true });
+  const deck = path.join(dir, 'deck.md');
+  fs.writeFileSync(deck, fs.readFileSync(deck, 'utf8').replace('## 3.5 ', '## 3.50 '));
+  const probe = `
+    const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+    const logged = [];
+    const log = { log(m){ logged.push(m); }, warn(){}, error(m){ logged.push(m); } };
+    const s = serve(${JSON.stringify(dir)}, { port: 0, log });
+    const port = s.address().port;
+    (async () => {
+      const r = await fetch('http://localhost:' + port + '/');
+      const body = await r.text();
+      console.log(JSON.stringify({ status: r.status, error: /declared 3.50/.test(body),
+        reloads: /Fix it and this page reloads itself/.test(body), logged }));
+      process.exit(0);
+    })();
+  `;
+  const { status, stdout, stderr } = require('child_process')
+    .spawnSync('node', ['-e', probe], { encoding: 'utf8' });
+  fs.rmSync(dir, { recursive: true, force: true });
+  eq(status, 0, `the server stayed up (${stderr.trim().split('\n')[0]})`);
+  const out = JSON.parse(stdout.trim().split('\n').pop());
+  eq(out.status, 500, 'the page is the error');
+  eq(out.error, true, 'and names the fault');
+  eq(out.reloads, true, 'and says it reloads on the next save');
+  eq(out.logged.some((m) => /does not render yet/.test(m)), true, 'the banner said so too');
+});
+
+check('the error page reloads on a change, not on the token it connects with', () => {
+  /* The stream sends its current token on connect. The page reloaded on
+     every message, that one included, so a deck with a fault reloaded
+     the error for ever: connect, token, reload, connect. */
+  const { errorPage } = require('./lib/pages.js');
+  const html = errorPage(new Error('a fault'));
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  let onmessage = null, reloads = 0;
+  const window = {
+    EventSource: function () { const es = this; Object.defineProperty(es, 'onmessage', { set(f) { onmessage = f; } }); },
+    location: { reload() { reloads++; } },
+  };
+  new Function('EventSource', 'location', script)(window.EventSource, window.location);
+  if (!onmessage) throw new Error('the page did not listen to the stream');
+  onmessage({ data: '100' });
+  eq(reloads, 0, 'the token it connected with is not a change');
+  onmessage({ data: '100' });
+  eq(reloads, 0, 'nor is the same token again');
+  onmessage({ data: '101' });
+  eq(reloads, 1, 'a new token is a save, and reloads');
+});
+
+check('the notes page says which version it is, and an earlier one can be asked for', () => {
+  const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-versions-'));
+  fs.cpSync(TALK.dir, dir, { recursive: true });
+  const probe = `
+    const fs = require('fs'); const path = require('path');
+    const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+    const quiet = { log(){}, warn(){}, error(){} };
+    const dir = ${JSON.stringify(dir)};
+    const s = serve(dir, { port: 0, log: quiet });
+    const port = s.address().port;
+    const get = async (u) => (await fetch('http://localhost:' + port + u)).text();
+    const ver = (html) => (html.match(/data-version="([^"]*)"/) || [])[1];
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    (async () => {
+      /* The room opens first, and only the deck page is served before the
+         save; the notes come later and ask for what the room is seeing. */
+      await get('/');
+      const v1 = await new Promise((ok) => require('http').get({ port, path: '/reload' }, (r) => {
+        r.once('data', (c) => { ok(String(c).replace(/^data: /, '').trim()); r.destroy(); });
+      }));
+      const deck = path.join(dir, 'deck.md');
+      const f = String.fromCharCode(96).repeat(3);           // a fence, kept out of this template
+      fs.writeFileSync(deck, fs.readFileSync(deck, 'utf8').replace(f + 'notes\\n', f + 'notes\\nEdited since.\\n'));
+      await wait(400);
+      const latest = await get('/presenter');
+      const held = await get('/presenter?v=' + v1);
+      console.log(JSON.stringify({ v1, v2: ver(latest), heldV: ver(held), heldEdited: /Edited since/.test(held), latestEdited: /Edited since/.test(latest) }));
+      process.exit(0);
+    })();
+  `;
+  const { status, stdout, stderr } = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8' });
+  fs.rmSync(dir, { recursive: true, force: true });
+  eq(status, 0, `the probe ran (${stderr.trim().split('\n')[0]})`);
+  const out = JSON.parse(stdout.trim().split('\n').pop());
+  if (!out.v1) throw new Error('the page carries no version');
+  if (out.v1 === out.v2) throw new Error('a save did not change the version');
+  eq(out.latestEdited, true, 'the latest page has the edit');
+  eq(out.heldV, out.v1, 'the earlier version is served back by number');
+  eq(out.heldEdited, false, 'as it was rendered');
 });
 
 /* And everything true of any talk, run over both this repo ships: the
