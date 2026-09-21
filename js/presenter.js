@@ -309,6 +309,20 @@
      not a window and claims nothing. */
   function hello(on) { send({ type: "hello", detached: !inFrame && !!OWNER }, on); }
 
+  /* A deck has spoken, and only that makes this window live.
+     It used to be the paint that said so, and this page paints itself
+     once on load because the script it was rendered with is already in
+     it. So a window opened with no deck behind it — a bookmarked
+     /presenter, a deck since closed — marked itself live before any
+     deck had answered, and the check below, which shows the warning when
+     nothing is live after a moment, could never fire. It sat there
+     showing the first slide's script as though it were following a
+     talk. */
+  function connected() {
+    document.body.classList.add("live");
+    document.body.classList.remove("orphan");
+  }
+
   function listen(ch, probing) {
     if (!ch) return;
     ch.onmessage = function (ev) {
@@ -323,7 +337,7 @@
       if (OWNER && m.tab && m.tab !== OWNER) return;
       /* A probe answers only the state that confirms the staged version;
          everything else still comes from the deck on the old channel. */
-      if (probing) { if (m.type === "state" && version(m.v, true)) { g = m.g; s = m.s; y = m.y; paint(); } return; }
+      if (probing) { if (m.type === "state" && version(m.v, true)) { g = m.g; s = m.s; y = m.y; connected(); paint(); } return; }
       if (m.type === "panel") { panelKey(m.key); return; }
       /* A deck window that reloaded asks whether its detached window is
          still open; a window of our own, not the dock's frame, answers.
@@ -337,7 +351,7 @@
       /* The deck says whether the map is showing; M on either window
          asks the deck, so both maps answer to one setting. */
       if (typeof m.map === "boolean") elMap.classList.toggle("hidden", !m.map);
-      document.body.classList.remove("orphan");
+      connected();
       paint();
     };
     ch.onmessageerror = function () { if (!probing) document.body.classList.add("orphan"); };
@@ -364,7 +378,7 @@
 
   var wasPainted = false;
   var origPaint = paint;
-  paint = function () { wasPainted = true; document.body.classList.add("live"); origPaint(); };
+  paint = function () { wasPainted = true; origPaint(); };
 
   // ------------------------------------------------------------- timer
 

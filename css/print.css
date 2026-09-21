@@ -1,0 +1,70 @@
+/* The deck on paper: every step of every slide, one page each, at the
+ * stage's own size.
+ *
+ * The frame's sheet lays the deck out for a room: one slide shown,
+ * fixed to the window, scaled by fit(). On paper there is no window and
+ * no runtime, so this sheet, linked last, puts every slide back into the
+ * flow, one under the next, each the size its templates were drawn at.
+ * `sipario export` prints this page and photographs it; the export reads
+ * the page's size off the stage rather than fixing one here, so a talk
+ * that sets --w and --h in its deck.css changes the paper with them.
+ *
+ * The rules are scoped to the print page's body rather than to .slide
+ * alone. A talk's template may restate the frame's own hiding of a slide
+ * (`.slide.template-x { display: none }`, with `.current` showing it),
+ * which is harmless in the room and, at two classes, would outrank a
+ * one-class rule here and drop that slide from the paper without a word.
+ *
+ * Nothing in here knows what a slide contains.
+ */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #fff;
+  overflow: visible;
+}
+
+#deck {
+  position: static;
+  overflow: visible;
+}
+
+body.print .slide {
+  display: block;
+  position: relative;
+  left: auto;
+  top: auto;
+  margin: 0;
+  transform: none;
+  box-shadow: none;
+  break-after: page;
+  page-break-after: always;
+  break-inside: avoid;
+}
+
+/* The slide's number, where the compass would carry it: the corner every
+   template leaves empty. Faint and in the frame's mono, so it reads as
+   the frame's mark and not the slide's. */
+body.print .slide::after {
+  content: attr(data-n);
+  position: absolute;
+  right: 20px;
+  bottom: 14px;
+  font: 14px/1 var(--mono);
+  color: var(--ink-faint);
+}
+
+body.print .slide.is-dark::after { color: var(--ink-lit-dim); }
+
+/* The room's chrome, which paper has no use for. */
+body.print .notes { display: none; }
+
+/* The colours are the slide's, not the printer's. */
+* {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+@page { margin: 0; }

@@ -42,6 +42,28 @@
 
   var g = 0, s = 0, y = 0;          // group, slide in group, step in slide
 
+  /* The id a link is asking for. A fragment arrives the way it was
+   * written down, and anything outside the ASCII a URL may carry bare is
+   * percent-encoded on the way: `#2-café` travels as `#2-caf%C3%A9`.
+   * Compared raw against the id on the slide the two never match, and a
+   * link to a real slide opened the first one instead and then rewrote
+   * the address bar, losing the link it was given.
+   *
+   * Reading this way only works if writing matches it, so the fragment
+   * is encoded when it is written, below. An id may itself contain what
+   * looks like an escape — `2-100%20` is a name somebody may choose —
+   * and written down bare it would be read back as `2-100 `, a slide
+   * that does not exist. Encoded, it goes down as `2-100%2520` and comes
+   * back as what it was.
+   *
+   * A fragment that is not valid encoding is somebody's literal `%`, and
+   * is matched as it stands rather than thrown over. */
+  function hashId() {
+    var raw = location.hash.slice(1);
+    if (!raw) return "";
+    try { return decodeURIComponent(raw); } catch (e) { return raw; }
+  }
+
   /* Where each movement was left. Going left or right returns to the
    * slide and step you were last on there, rather than to the top: coming
    * back to a movement mid-talk to answer a question should put you where
@@ -471,8 +493,8 @@
     }
     paintSteps();
     save();
-    if (location.hash.slice(1) !== here.id) {
-      history.replaceState(null, "", "#" + here.id);
+    if (hashId() !== here.id) {
+      history.replaceState(null, "", "#" + encodeURIComponent(here.id));
     }
     fit();
     publish();
@@ -887,7 +909,8 @@
   }
 
   /* The hash is explicit and wins; the saved position is the fallback. */
-  var start = slides.findIndex(function (el) { return el.id === location.hash.slice(1); });
+  var asked = hashId();
+  var start = asked ? slides.findIndex(function (el) { return el.id === asked; }) : -1;
   if (start > -1) {
     jump(start);
   } else if (saved && groups[saved.g] && groups[saved.g][saved.s] &&

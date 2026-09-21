@@ -1887,6 +1887,100 @@ check('the notes are never docked and detached at once', () => {
 });
 
 
+check('a slide reached by an encoded link is the slide that opens', () => {
+  /* A fragment travels the way a URL may carry it, so `#2-café` arrives
+     as `#2-caf%C3%A9`. Matched raw against the id on the slide it found
+     nothing, opened the first slide instead, and then rewrote the
+     address bar from it — losing the link it had been given. */
+  const src = MOVES_SRC.replace('id: 2-middle', 'id: 2-café');
+  const r = render(src, TALK);
+  const body = `<main id="deck" data-deck="${r.deck.key}">${r.html}</main>
+    <div id="progress"><div id="progress-bar"></div></div>`;
+  const w = windowFor(body, [js], makeBus(), 'http://localhost:9999/#2-caf%C3%A9');
+  eq(w.document.querySelector('.slide.current').id, '2-café', 'the slide the link named');
+  eq(decodeURIComponent(w.location.hash.slice(1)), '2-café', 'and the address bar still says so');
+});
+
+check('a browser that goes before it answers the navigation fails the call without ending the process', () => {
+  /* The wait for the load event is created before the navigation is
+     sent, so for a moment nothing is holding it. A browser that goes in
+     that moment fails both at once, and a rejection nobody is holding
+     ends the process — the caller catching this call is not enough, and
+     an export would die on the way to its own error message. */
+  const probe = `
+    const { Session, Page } = require(${JSON.stringify(path.join(ROOT, 'lib/browser.js'))});
+    const ws = {
+      send(raw) {
+        const m = JSON.parse(raw);
+        /* Answers everything until the navigation, then goes. */
+        if (m.method === 'Page.navigate') { setImmediate(() => ws.onclose()); return; }
+        setImmediate(() => ws.onmessage({ data: JSON.stringify({ id: m.id, result: {} }) }));
+      },
+      close() {},
+    };
+    new Page(new Session(ws)).open('about:blank').then(
+      () => console.log(JSON.stringify({ resolved: true })),
+      (e) => console.log(JSON.stringify({ caught: e.message })));
+  `;
+  const { status, stdout, stderr } = require('child_process')
+    .spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 25000 });
+  const out = JSON.parse((stdout.trim().split('\n').pop()) || '{}');
+  if (!out.caught) throw new Error(`it did not fail the call: ${stdout.trim() || '(nothing)'}`);
+  if (status !== 0) {
+    throw new Error(`the call failed but the process died anyway (${status}): ` +
+      `${stderr.trim().split('\n').filter((l) => /Error|rejection/.test(l))[0] || stderr.trim().split('\n')[0]}`);
+  }
+});
+
+check('the link the deck writes for a slide opens that slide again', () => {
+  /* Reading the fragment decoded only works if writing it encodes, and
+     an id may itself hold what looks like an escape: `2-100%20` written
+     down bare reads back as `2-100 `, a slide that is not there. This
+     moves to the slide, takes the address bar as a person would, and
+     opens it in a second window. */
+  const src = MOVES_SRC.replace('id: 2-middle', 'id: 2-100%20');
+  const r = render(src, TALK);
+  const body = `<main id="deck" data-deck="${r.deck.key}">${r.html}</main>
+    <div id="progress"><div id="progress-bar"></div></div>`;
+  const w1 = windowFor(body, [js], makeBus());
+  w1.document.dispatchEvent(new w1.KeyboardEvent('keydown', { key: 'ArrowRight' }));
+  eq(w1.document.querySelector('.slide.current').id, '2-100%20', 'the deck is on the slide');
+  const wrote = w1.location.hash;
+  if (!wrote) throw new Error('the deck wrote no link for the slide it is on');
+  const w2 = windowFor(body, [js], makeBus(), `http://localhost:9999/${wrote}`);
+  eq(w2.document.querySelector('.slide.current').id, '2-100%20',
+    `the link it wrote (${wrote}) opens the slide it wrote it from`);
+});
+
+check('a link to a slide that is not there still opens the deck at the start', () => {
+  const r = render(MOVES_SRC, TALK);
+  const body = `<main id="deck" data-deck="${r.deck.key}">${r.html}</main>
+    <div id="progress"><div id="progress-bar"></div></div>`;
+  for (const hash of ['#nothing-here', '#%E0%A4%A', '#']) {
+    const w = windowFor(body, [js], makeBus(), `http://localhost:9999/${hash}`);
+    eq(w.document.querySelector('.slide.current').id, '1-three-movements', `${hash} opens the first slide`);
+  }
+});
+
+check('the presenter says it is following a deck only once one has spoken', () => {
+  /* The page paints itself on load, because the script it was rendered
+     with is already in it, and the paint used to be what marked the
+     window live. So a /presenter opened with no deck behind it declared
+     itself live before anything had answered, and the warning that
+     should have replaced the script could never appear. */
+  const bus = makeBus();
+  const p = windowFor(presenterBody, [presenterJs], bus);
+  eq(p.document.body.classList.contains('live'), false, 'nothing has spoken yet');
+  p.dispatchEvent(new p.Event('resize'));
+  eq(p.document.body.classList.contains('live'), false, 'and painting is not being followed');
+  if (!p.document.getElementById('notes').innerHTML.trim()) {
+    throw new Error('the script is blank, so this check is not testing what it says');
+  }
+  windowFor(deckBody, [js], bus);            // a deck opens and says where it is
+  eq(p.document.body.classList.contains('live'), true, 'a deck spoke');
+  eq(p.document.body.classList.contains('orphan'), false, 'so it is not an orphan');
+});
+
 // ------------------------------------------------ the engine and its format
 
 /* The templates live one to a file under a talk's templates/, discovered
@@ -2342,6 +2436,365 @@ check('a file is shown under the path it was read from', () => {
   if (!out.includes('## A heading')) throw new Error('the excerpt was read as a heading');
 });
 
+// ------------------------------- the deck on paper, and in PowerPoint
+
+/* Both exports photograph the /print page through a browser already on
+   the machine. What can be checked without one: the page itself, the
+   order the export reads the deck in, the script as text, the .pptx a
+   set of pictures becomes, and how the browser is found. The one check
+   that needs a browser runs when there is one and says so when not. */
+
+const { printPage } = require('./lib/pages.js');
+const { outline, pdfPages } = require('./lib/export.js');
+const { pptx } = require('./lib/pptx.js');
+const { findBrowser } = require('./lib/browser.js');
+const { notesText, parse } = require('./lib/render.js');
+
+/* A zip read back the way it was written: local headers in sequence,
+   which is all a reader of one archive it wrote itself needs. */
+function unzip(buf) {
+  const out = new Map();
+  let p = 0;
+  while (p + 30 <= buf.length && buf.readUInt32LE(p) === 0x04034b50) {
+    const method = buf.readUInt16LE(p + 8);
+    const size = buf.readUInt32LE(p + 18);
+    const nameLen = buf.readUInt16LE(p + 26);
+    const extraLen = buf.readUInt16LE(p + 28);
+    const name = buf.toString('utf8', p + 30, p + 30 + nameLen);
+    const start = p + 30 + nameLen + extraLen;
+    const body = buf.subarray(start, start + size);
+    out.set(name, method === 8 ? require('zlib').inflateRawSync(body) : Buffer.from(body));
+    p = start + size;
+  }
+  return out;
+}
+
+/* The smallest PNG there is: one white pixel. */
+const PIXEL = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==',
+  'base64');
+
+check('the print page carries every step once, in order, and no runtime', () => {
+  const r = render(deckSrc, TALK);
+  const page = printPage(r);
+  const ids = [...page.matchAll(/<section class="slide[^"]*" id="([^"]+)"/g)].map((m) => m[1]);
+  eq(ids.length, r.steps, 'one section per step');
+  eq(ids.join(' '), outline(deckSrc, TALK).map((s) => s.id).join(' '), 'in the order the export reads');
+  if (/<script/.test(page)) throw new Error('the print page loads a script; there is nothing for one to do');
+  const links = [...page.matchAll(/href="([^"]+\.css)"/g)].map((m) => m[1]);
+  eq(links[0], '/css/theme.css', 'the frame first');
+  eq(links[links.length - 1], '/css/print.css', 'the print sheet last, so it has the final word');
+  eq(links.slice(1, -1).join(' '), ['/deck.css'].concat(r.sheets).join(' '), "the talk's sheets between");
+  if (!/<body class="print">/.test(page)) throw new Error('the body is not marked as the print page');
+});
+
+check('the server serves the print page', () => {
+  const probe = `
+    const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+    const quiet = { log(){}, warn(){}, error(){} };
+    const s = serve(${JSON.stringify(TALK.dir)}, { port: 0, log: quiet });
+    (async () => {
+      const port = s.address().port;
+      const r = await fetch('http://localhost:' + port + '/print');
+      const body = await r.text();
+      const sheet = await fetch('http://localhost:' + port + '/css/print.css');
+      console.log(JSON.stringify({ status: r.status, sections: (body.match(/<section class="slide/g) || []).length,
+                                   linked: /href="\\/css\\/print.css"/.test(body), sheet: sheet.status }));
+      process.exit(0);
+    })();
+  `;
+  const { status, stdout, stderr } = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8' });
+  eq(status, 0, `the probe ran (${stderr.trim().split('\n')[0]})`);
+  const out = JSON.parse(stdout.trim());
+  eq(out.status, 200, '/print answers');
+  eq(out.sections, steps, 'with every step');
+  eq(out.linked, true, 'and links the print sheet');
+  eq(out.sheet, 200, 'which is served');
+});
+
+check('the export reads every step with its number, its place in the build and its script', () => {
+  const list = outline(deckSrc, TALK);
+  eq(list.length, steps, 'as many as the deck has');
+  eq(list[0].n, '1.1', 'the first is 1.1');
+  eq(list[0].step, 1, 'and the first step');
+  const build = list.find((s) => s.of > 1);
+  if (!build) throw new Error('the example has no build to check against');
+  const run = list.filter((s) => s.n === build.n);
+  eq(run.map((s) => s.step).join(','), run.map((_, i) => i + 1).join(','), 'a build counts its steps');
+  eq(run.every((s) => s.of === run.length), true, 'and knows how many there are');
+  eq(run[1].id, `${run[0].id}-2`, "a later step is the first's id with a suffix");
+  if (!list.every((s) => s.notes)) throw new Error('a step of the example has no script');
+  if (!list.every((s) => s.group)) throw new Error('a step of the example is in no movement');
+});
+
+check('a script becomes notes text: an item per line, paragraphs apart, emphasis dropped, a cue kept', () => {
+  const text = notesText('Say **this** and *that*.\nOn one line.\n\n- one\n- two\n\n1. first\n2. second\n\n[pause]');
+  eq(text, 'Say this and that. On one line.\n\n• one\n• two\n\n1. first\n2. second\n\n[pause]', 'the text');
+  eq(notesText(''), '', 'no script is no text');
+});
+
+check('the notes as text and the notes as markup read one script the same way', () => {
+  for (const sl of parse(deckSrc)) {
+    sl.steps.forEach((st, k) => {
+      const id = sl.meta.id + (k ? `-${k + 1}` : '');
+      const m = html.match(new RegExp(`id="${id}"[\\s\\S]*?<aside class="notes">([\\s\\S]*?)</aside>`));
+      if (!m) throw new Error(`no notes markup for ${id}`);
+      const markup = (m[1].match(/<(p|ul|ol)[ >]/g) || []).length;
+      const text = notesText(st.note);
+      eq(text ? text.split('\n\n').length : 0, markup, `${id}: paragraphs in the text against blocks in the markup`);
+    });
+  }
+});
+
+check('a PowerPoint deck is the zip PowerPoint expects: every part in the manifest, every relationship resolving, a picture and a script per step', () => {
+  const buf = pptx({ title: 'T & co', width: 1280, height: 720, slides: [
+    { png: PIXEL, notes: 'First.\n\nSecond <line> & more.', name: '1.1 One' },
+    { png: PIXEL, notes: '', name: '1.2' },
+    { png: PIXEL, notes: 'Third.', name: '2.1 Three' },
+  ] });
+  const parts = unzip(buf);
+  const names = [...parts.keys()];
+  eq(names[0], '[Content_Types].xml', 'the manifest comes first');
+  const text = (n) => {
+    if (!parts.has(n)) throw new Error(`no part ${n}`);
+    return parts.get(n).toString('utf8');
+  };
+
+  /* The manifest and the zip name the same parts. */
+  const overrides = [...text('[Content_Types].xml').matchAll(/PartName="\/([^"]+)"/g)].map((m) => m[1]);
+  for (const o of overrides) if (!parts.has(o)) throw new Error(`the manifest names ${o}, which is not in the zip`);
+  for (const n of names) {
+    if (n === '[Content_Types].xml' || n.endsWith('.rels') || n.endsWith('.png')) continue;
+    if (!overrides.includes(n)) throw new Error(`${n} is in the zip and not in the manifest`);
+  }
+
+  /* Every relationship reaches a part, and every id a part uses is one
+     its own .rels declares. */
+  for (const n of names) {
+    if (!n.endsWith('.rels')) continue;
+    const dir = path.posix.dirname(path.posix.dirname(n));
+    const owner = path.posix.join(dir, path.posix.basename(n, '.rels'));
+    const rels = text(n);
+    const ids = new Set([...rels.matchAll(/Id="([^"]+)"/g)].map((m) => m[1]));
+    for (const [, target] of rels.matchAll(/Target="([^"]+)"/g)) {
+      const resolved = n === '_rels/.rels' ? target : path.posix.normalize(path.posix.join(dir, target));
+      if (!parts.has(resolved)) throw new Error(`${n} points at ${target}, which is not in the zip`);
+    }
+    if (parts.has(owner)) {
+      for (const [, id] of text(owner).matchAll(/r:(?:id|embed)="([^"]+)"/g)) {
+        if (!ids.has(id)) throw new Error(`${owner} uses ${id}, which ${n} does not declare`);
+      }
+    }
+  }
+
+  eq(names.filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n)).length, 3, 'a slide per picture');
+  eq(names.filter((n) => /^ppt\/notesSlides\/notesSlide\d+\.xml$/.test(n)).length, 3, 'and notes for each');
+  eq(names.filter((n) => n.startsWith('ppt/media/')).length, 3, 'and the pictures');
+  eq(parts.get('ppt/media/image2.png').equals(PIXEL), true, 'stored as given');
+  const notes1 = text('ppt/notesSlides/notesSlide1.xml');
+  if (!notes1.includes('<a:t>First.</a:t>')) throw new Error('the first script is not in the first notes');
+  if (!notes1.includes('<a:t>Second &lt;line&gt; &amp; more.</a:t>')) throw new Error('the script is not escaped');
+  eq((notes1.match(/<a:p>/g) || []).length, 3, 'a paragraph per line, the blank one included');
+  const pres = text('ppt/presentation.xml');
+  if (!/<p:sldSz cx="12192000" cy="6858000"\/>/.test(pres)) throw new Error('the slide is not 1280x720 in EMUs');
+  eq((pres.match(/<p:sldId /g) || []).length, 3, 'three slides listed');
+  if (!text('docProps/core.xml').includes('<dc:title>T &amp; co</dc:title>')) throw new Error('the title is not carried, escaped');
+  if (!text('ppt/slides/slide1.xml').includes('name="1.1 One"')) throw new Error('a slide is not named for its number and title');
+  if (!text('ppt/slides/slide1.xml').includes('cx="12192000" cy="6858000"')) throw new Error('the picture does not fill the slide');
+});
+
+check('a browser that goes away tells everything waiting on it, commands and events alike', () => {
+  /* A command was told and an event waiter was not, so a browser that
+     answered the navigation and then died left `open()` waiting on a
+     load event that could no longer come: no error, no timeout, an
+     export that never returned and never said why. The probe drives a
+     session over a socket of its own and closes it. */
+  const probe = `
+    const { Session } = require(${JSON.stringify(path.join(ROOT, 'lib/browser.js'))});
+    const ws = { send() {}, close() {} };
+    const s = new Session(ws);
+    const said = [];
+    const note = (what) => (p) => p.then(() => said.push(what + ': resolved'),
+                                         (e) => said.push(what + ': ' + e.message));
+    const settled = Promise.all([
+      note('command')(s.send('Page.navigate', { url: 'about:blank' })),
+      note('event')(s.once('Page.loadEventFired')),
+    ]);
+    ws.onclose();
+    settled.then(() => console.log(JSON.stringify(said)));
+  `;
+  const { status, stdout, stderr } = require('child_process')
+    .spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 25000 });
+  eq(status, 0, `the probe ran (${stderr.trim().split('\n')[0]})`);
+  if (!stdout.trim()) {
+    throw new Error('nothing settled: something is still waiting on a browser that has gone');
+  }
+  const said = JSON.parse(stdout.trim().split('\n').pop());
+  eq(said.length, 2, 'both were told');
+  for (const line of said) {
+    if (!/closed the connection/.test(line)) throw new Error(`still waiting, or told wrongly: ${line}`);
+  }
+});
+
+check('the browser is the one named, else one of the usual ones, else an error that says what to set', () => {
+  eq(findBrowser({ SIPARIO_BROWSER: process.execPath }), process.execPath, 'a named binary is taken as it is');
+  let err = null;
+  try { findBrowser({ SIPARIO_BROWSER: '/nowhere/browser' }); } catch (e) { err = e; }
+  if (!err || !/SIPARIO_BROWSER/.test(err.message) || !/\/nowhere\/browser/.test(err.message)) {
+    throw new Error(`a wrong name is not named back: ${err && err.message}`);
+  }
+  err = null;
+  try { findBrowser({ PATH: '' }, 'plan9'); } catch (e) { err = e; }
+  if (!err || !/SIPARIO_BROWSER/.test(err.message)) {
+    throw new Error(`no browser does not say how to name one: ${err && err.message}`);
+  }
+});
+
+check('the page count is read off the PDF, not assumed', () => {
+  const doc = '%PDF-1.4\n1 0 obj <</Type /Pages /Kids [2 0 R] /Count 3>> endobj\n' +
+    '4 0 obj <</Type /Pages /Count 1 /Parent 1 0 R>> endobj\n';
+  eq(pdfPages(Buffer.from(doc)), 3, "the root's count");
+  eq(pdfPages(Buffer.from('%PDF-1.4\n')), 0, 'none is none');
+});
+
+check('export with no format, or one it does not know, says what it takes', () => {
+  for (const args of [[], ['docx']]) {
+    const { status, stderr } = require('child_process')
+      .spawnSync('node', [path.join(ROOT, 'bin/sipario.js'), 'export', ...args], { encoding: 'utf8' });
+    eq(status, 2, `it exited on the usage (${args.join(' ') || 'no format'})`);
+    if (!/usage: sipario export <pdf\|pptx>/.test(stderr)) throw new Error(`no usage line: ${stderr}`);
+  }
+});
+
+check('an export that finds no browser leaves nothing listening or watching behind it', () => {
+  /* The server is started before the browser is looked for, so a machine
+     with no browser used to be left holding the port and watching the
+     talk for the life of the process. A CLI exits either way and says
+     nothing about it; this runs a process that does not, and lets the
+     absence of a hang be the assertion. */
+  const probe = `
+    process.env.SIPARIO_BROWSER = '/nowhere/no-browser-here';
+    const { exportPdf } = require(${JSON.stringify(path.join(ROOT, 'lib/export.js'))});
+    exportPdf(${JSON.stringify(TALK.dir)}).then(
+      () => console.log('RESOLVED'),
+      (err) => console.log('REFUSED ' + err.message.split('\\n')[0]));
+  `;
+  const { status, stdout, signal } = require('child_process')
+    .spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 25000 });
+  if (status === null) {
+    throw new Error(`the process did not end by itself (${signal}): something is still listening or watching`);
+  }
+  eq(status, 0, 'it exited of its own accord');
+  if (!/^REFUSED .*SIPARIO_BROWSER/.test(stdout.trim())) {
+    throw new Error(`it did not refuse by naming the browser: ${stdout.trim()}`);
+  }
+});
+
+/* The checks that need a browser. They run the CLI as a reader would, in
+   a folder of their own, and read the files back. */
+{
+  let browser = null;
+  try { browser = findBrowser(); } catch { /* none on this machine */ }
+  const whenBrowser = (name, fn) => {
+    if (browser) return check(name, fn);
+    return console.log(`  --    ${name}\n        not run: no browser on this machine to export with`);
+  };
+  /* A talk of its own, copied from the example, for the checks that have
+     to break one. */
+  const scratch = () => {
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-broken-'));
+    const t = path.join(dir, 'talk');
+    scaffold(t);
+    return t;
+  };
+
+  whenBrowser('a figure that does not load stops the export and is named', () => {
+    /* render() does not open every file a template names, so a deleted
+       icon renders happily and prints as a hole. Nothing downstream
+       would mention it: the ids match, the sizes match, and the export
+       would write a file that is wrong only to look at. */
+    const dir = scratch();
+    const icon = path.join(dir, 'images', 'icon-folder.svg');
+    if (!fs.existsSync(icon)) throw new Error('the example no longer has the icon this check removes');
+    fs.rmSync(icon);
+    const { status, stderr } = require('child_process')
+      .spawnSync('node', [path.join(ROOT, 'bin/sipario.js'), 'export', 'pdf', dir],
+        { cwd: dir, encoding: 'utf8', timeout: 90000 });
+    eq(status, 1, `it refused (${stderr.trim()})`);
+    if (!/icon-folder\.svg/.test(stderr)) throw new Error(`it did not name the figure: ${stderr.trim()}`);
+    fs.rmSync(path.dirname(dir), { recursive: true, force: true });
+  });
+
+  whenBrowser('a save while the deck is exporting stops it, rather than pairing the new pictures with the old scripts', () => {
+    /* The outline is read from deck.md, and the page is rendered from
+       deck.md again when the browser asks for it. An edit inside a
+       script moves no id and changes no size, so this is the only thing
+       standing between a save mid-export and a file whose notes belong
+       to the draft before it.
+
+       The export reads deck.md before its first await, and the edit
+       below lands straight after the call, so the page the browser is
+       later served is certainly the edited one. Nothing here races. */
+    const dir = scratch();
+    const deck = path.join(dir, 'deck.md');
+    const out = path.join(dir, 'out.pdf');
+    const probe = `
+      const fs = require('fs');
+      const { exportPdf } = require(${JSON.stringify(path.join(ROOT, 'lib/export.js'))});
+      const deck = ${JSON.stringify(deck)};
+      const out = ${JSON.stringify(out)};
+      const before = fs.readFileSync(deck, 'utf8');
+      const after = before.replace('This deck exists twice over.',
+                                   'This deck exists twice over. Edited mid-export.');
+      if (after === before) throw new Error('the example no longer holds the line this edits');
+      const running = exportPdf(${JSON.stringify(dir)}, { out });
+      fs.writeFileSync(deck, after);
+      running.then(
+        () => console.log(JSON.stringify({ finished: true, wrote: fs.existsSync(out) })),
+        (e) => console.log(JSON.stringify({ message: e.message, wrote: fs.existsSync(out) })));
+    `;
+    const { status, stdout, stderr } = require('child_process')
+      .spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 90000 });
+    eq(status, 0, `the probe ran (${stderr.trim().split('\n')[0]})`);
+    const r = JSON.parse(stdout.trim().split('\n').pop());
+    if (r.finished) throw new Error('the export finished as though nothing had changed');
+    if (!/changed while the deck was being exported/.test(r.message)) {
+      throw new Error(`it stopped for another reason: ${r.message}`);
+    }
+    eq(r.wrote, false, 'and wrote no file');
+    fs.rmSync(path.dirname(dir), { recursive: true, force: true });
+  });
+
+  whenBrowser("exported, the example is a PDF of a page per step at the stage's size, " +
+    'and a PowerPoint deck of a picture per step with its script', () => {
+      const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-export-'));
+      const cli = path.join(ROOT, 'bin/sipario.js');
+      const run = (args) => require('child_process')
+        .spawnSync('node', [cli, 'export', ...args], { cwd: dir, encoding: 'utf8', timeout: 90000 });
+
+      const pdf = run(['pdf', TALK.dir]);
+      eq(pdf.status, 0, `pdf exported (${pdf.stderr.trim()})`);
+      if (!/^\[export\] minimal\.pdf: \d+ pages at 1280x720/.test(pdf.stdout)) throw new Error(`said: ${pdf.stdout}`);
+      const buf = fs.readFileSync(path.join(dir, 'minimal.pdf'));
+      eq(pdfPages(buf), steps, 'a page per step');
+      if (!/\/MediaBox \[0 0 960 540\]/.test(buf.toString('latin1'))) {
+        throw new Error('the page is not 1280x720 at 96 to the inch, which is 960x540 points');
+      }
+
+      const ppt = run(['pptx', TALK.dir, '-o', 'deck.pptx']);
+      eq(ppt.status, 0, `pptx exported (${ppt.stderr.trim()})`);
+      const parts = unzip(fs.readFileSync(path.join(dir, 'deck.pptx')));
+      eq([...parts.keys()].filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n)).length, steps, 'a slide per step');
+      const png = parts.get('ppt/media/image1.png');
+      eq(`${png.readUInt32BE(16)}x${png.readUInt32BE(20)}`, '2560x1440', 'the picture is the stage at twice its size');
+      const first = outline(deckSrc, TALK)[0].notes.split('\n')[0];
+      if (!parts.get('ppt/notesSlides/notesSlide1.xml').toString('utf8').includes(`<a:t>${first}</a:t>`)) {
+        throw new Error('the first script is not in the first notes');
+      }
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+}
+
 // ------------------------------------------------------------ the CLI, run
 
 check('renumber agrees with the renderer, and rewrites nothing that is right', () => {
@@ -2374,6 +2827,67 @@ check('renumber honours number-from: 0', () => {
   eq(/^id: 0-three-movements$/m.test(out), true, 'and its id prefix followed');
   eq(/^## 1\.1\b/m.test(out), true, 'the second movement is 1.x');
   render(out, TALK);                       // and the renderer agrees
+});
+
+/* A deck opening with a comment, carrying a quoted id. Both are things
+   the renderer accepts, so renumber has to accept them too: it edits a
+   deck in place, and a deck it breaks is one somebody wrote correctly. */
+const COMMENTED = ['<!--', '# Editing notes', 'A hash here is prose, not a movement.', '-->', '',
+  'name: Commented', '', '# One', '', '## 1.1 First', "id: '1-quoted'", 'template: statement', '',
+  'One.', '', '```notes', 'The first.', '```', '', '# Two', '', '## 2.1 Second', 'id: 2-plain',
+  'template: statement', '', 'Two.', '', '```notes', 'The second.', '```', ''].join('\n');
+
+const renumbered = (src) => {
+  const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'renumber-'));
+  const file = path.join(dir, 'deck.md');
+  fs.writeFileSync(file, src);
+  const r = require('./lib/renumber.js').renumber(file);
+  const after = fs.readFileSync(file, 'utf8');
+  fs.rmSync(dir, { recursive: true, force: true });
+  return { r, after };
+};
+
+check('a comment at the head of a deck is prose to renumber, as it is to the renderer', () => {
+  /* The renderer drops a leading comment before it reads anything. This
+     did not, so a `# ` line inside one counted as a movement, pushed
+     every number up by one and rewrote a deck that was already right. */
+  render(COMMENTED, TALK);                       // the deck is good to start with
+  const { r, after } = renumbered(COMMENTED);
+  eq(r.sections, 2, 'two movements, not three');
+  eq(r.changed, 0, 'and nothing to renumber');
+  eq(after.startsWith('<!--\n# Editing notes'), true, 'the comment is still there, untouched');
+  eq((after.match(/^## .*$/gm) || []).join(' '), '## 1.1 First ## 2.1 Second', 'the numbers held');
+  render(after, TALK);                           // and it still renders
+});
+
+check('a deck whose number-from sits under a comment is still numbered from there', () => {
+  /* The scan for `number-from:` stops at the first movement, and a hash
+     inside the comment was one, so the key below it was never read. */
+  const { r, after } = renumbered(COMMENTED.replace('name: Commented', 'name: Commented\nnumber-from: 0'));
+  eq(r.sections, 2, 'still two movements');
+  eq((after.match(/^## .*$/gm) || []).join(' '), '## 0.1 First ## 1.1 Second', 'counted from zero');
+  eq(/^id: '0-quoted'$/m.test(after), true, "and the id's prefix followed");
+});
+
+check('renumber reads through the quotes on an id rather than prefixing them', () => {
+  /* Front matter may quote a value, and the quotes belong to the parser,
+     not to the id. Prefixed blindly, `id: '1-x'` became `id: 1-'1-x'`,
+     which renders as a different anchor: every link to that slide, and
+     the slide's own place in the deck's numbering, quietly moved. */
+  const { after } = renumbered(COMMENTED);
+  eq(/^id: '1-quoted'$/m.test(after), true, 'the quoted id is unchanged');
+  const ids = [...render(after, TALK).html.matchAll(/<section class="slide[^"]*" id="([^"]+)"/g)].map((m) => m[1]);
+  eq(ids.join(' '), '1-quoted 2-plain', 'and it is still the anchor it was');
+});
+
+check('renumber moves a quoted id to its new section, keeping its quotes', () => {
+  /* The movement is renamed away, so the second slide becomes 1.2 and
+     its prefix has to follow it while the quotes stay where they were. */
+  const { after } = renumbered(COMMENTED.replace('\n# Two\n', '\n'));
+  eq((after.match(/^## .*$/gm) || []).join(' '), '## 1.1 First ## 1.2 Second', 'both in one movement now');
+  eq(/^id: '1-quoted'$/m.test(after), true, 'the quoted id kept its quotes');
+  eq(/^id: 1-plain$/m.test(after), true, 'and the plain one moved too');
+  render(after, TALK);
 });
 
 check('renumber with no deck named says so rather than guessing', () => {
@@ -2556,8 +3070,9 @@ check('the shared half names no template of the talk it happens to be serving', 
   /* The review trigger for this whole split. `render.js` gave `section`
      its word and `presenter.js` looked for `p.statement-line`; both were
      a talk's design sitting in code every other talk reads. */
-  const shared = ['css/theme.css', 'css/presenter.css', 'js/deck.js', 'js/presenter.js',
-                  'lib/render.js', 'lib/pages.js', 'lib/engine.js', 'lib/templates.js']
+  const shared = ['css/theme.css', 'css/presenter.css', 'css/print.css', 'js/deck.js',
+                  'js/presenter.js', 'lib/render.js', 'lib/pages.js', 'lib/engine.js',
+                  'lib/templates.js', 'lib/export.js', 'lib/pptx.js', 'lib/browser.js']
     .map((f) => [f, fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')]);
   for (const k of names) {
     for (const [f, text] of shared) {
@@ -2572,7 +3087,7 @@ check("every url() in the frame's stylesheets resolves to a file", () => {
      property is dropped and the page renders as though nobody had asked
      for it. */
   const missing = [];
-  for (const sheet of ['css/theme.css', 'css/presenter.css']) {
+  for (const sheet of ['css/theme.css', 'css/presenter.css', 'css/print.css']) {
     const text = fs.readFileSync(path.join(ROOT, sheet), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
     for (const m of text.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g)) {
       const ref = m[1].trim();
@@ -2591,7 +3106,7 @@ check('colours in the frame are named for their purpose, not their value', () =>
      scale to know what it is changing. Names say the job instead. */
   const SCALES = /var\(--(slate|teal|gray|zinc|neutral|stone|indigo|sky|blue|amber)-?\d*\)/;
   const VALUES = /var\(--(white|black|green|red|blue|indigo|purple|orange)\)/;
-  for (const f of ['css/theme.css', 'css/presenter.css']) {
+  for (const f of ['css/theme.css', 'css/presenter.css', 'css/print.css']) {
     for (const line of fs.readFileSync(path.join(ROOT, f), 'utf8').split('\n')) {
       const m = line.match(SCALES) || line.match(VALUES);
       if (m) throw new Error(`${f} asks for ${m[0]}, which names a colour rather than a job`);
@@ -2600,7 +3115,7 @@ check('colours in the frame are named for their purpose, not their value', () =>
 });
 
 check('no token is declared and never asked for', () => {
-  const text = ['css/theme.css', 'css/presenter.css']
+  const text = ['css/theme.css', 'css/presenter.css', 'css/print.css']
     .map((f) => fs.readFileSync(path.join(ROOT, f), 'utf8')).join('\n') +
     talkCss() +
     fs.readdirSync(TALK.templateRoot).filter((f) => f.endsWith('.js'))
@@ -2741,6 +3256,42 @@ check('the server serves the pages and the sheets, and not the templates', () =>
   if (!/^data: \d+\n\n$/.test(out.reload.chunk)) {
     throw new Error(`the first reload event is ${JSON.stringify(out.reload.chunk)}`);
   }
+});
+
+check('a request that is not a URL is answered, and does not take the server with it', () => {
+  /* `new URL()` throws on a request line like `//[/`, and a throw in a
+     request handler is uncaught: a stranger on the network could end a
+     talk between two slides. The assertion that matters is the second
+     request, which only arrives if the server is still there. */
+  const probe = `
+    const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+    const net = require('net');
+    const quiet = { log(){}, warn(){}, error(){} };
+    const s = serve(${JSON.stringify(TALK.dir)}, { port: 0, log: quiet });
+    process.on('uncaughtException', (e) => { console.log(JSON.stringify({ crashed: e.code })); process.exit(0); });
+    s.once('listening', () => {
+      const port = s.address().port;
+      const c = net.connect(port, '127.0.0.1', () => c.write('GET //[/ HTTP/1.1\\r\\nHost: localhost\\r\\n\\r\\n'));
+      let said = '';
+      c.on('data', (d) => {
+        said += d;
+        if (!/\\r\\n/.test(said)) return;
+        c.destroy();
+        /* Still answering after the bad one is the whole point. */
+        fetch('http://127.0.0.1:' + port + '/').then((r) => {
+          console.log(JSON.stringify({ status: said.split('\\r\\n')[0], after: r.status }));
+          process.exit(0);
+        });
+      });
+    });
+  `;
+  const { status, stdout, stderr } = require('child_process')
+    .spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 25000 });
+  eq(status, 0, `the probe ran (${stderr.trim().split('\n')[0]})`);
+  const out = JSON.parse(stdout.trim().split('\n').pop() || '{}');
+  if (out.crashed) throw new Error(`the server died of the request: ${out.crashed}`);
+  eq(/^HTTP\/1\.1 400\b/.test(out.status || ''), true, `it answered ${out.status}`);
+  eq(out.after, 200, 'and was still serving the deck afterwards');
 });
 
 check('the Templates slide lists every template, and each titled slide carries its number', () => {

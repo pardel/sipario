@@ -4,6 +4,51 @@ Newest first, one line per thing somebody using sipario would notice.
 Every break is stated as a break: before 1.0 there is no major to spend,
 so a break ships as a minor and this file is the whole of the warning.
 
+## Unreleased
+
+- **Added:** `sipario export pdf` and `sipario export pptx`. The deck as
+  a PDF, a page per step at the stage's size, and as a PowerPoint deck of
+  a picture per step with the step's script in its notes. Both photograph
+  the new `/print` page through a browser already on the machine (Chrome,
+  Chromium, Brave or Edge; `SIPARIO_BROWSER` names one elsewhere), so
+  neither can disagree with the room. It refuses rather than writing a
+  file that is wrong only to look at: a step the talk's sheets hide, a
+  PDF a page short, a figure that did not load, and a save landing
+  mid-run, which would pair one draft's pictures with another's scripts.
+  A browser that goes away mid-run is an error too, rather than a wait
+  that never ends.
+  `exportPdf`, `exportPptx`, `outline`, `printPage` and `findBrowser`
+  join the library's surface.
+- **Fixed:** printing the deck page from the browser stacked every slide
+  on one sheet. The rule that tried is gone; `/print` is the page that
+  prints.
+- **Fixed:** a request the URL parser refuses, such as `GET //[/`, took
+  the server down. It threw where nothing could catch it, so anyone able
+  to reach the port could end a talk between two slides. Such a request
+  is now answered 400 and the server stays up.
+- **Fixed:** `renumber` counted a `# ` line inside a comment at the head
+  of a deck as a movement. The renderer ignores that comment, so a deck
+  that rendered correctly was renumbered wrongly from its second slide
+  on, and a `number-from:` line below the comment was never read at all.
+  Both now skip the comment, which is put back untouched.
+- **Fixed:** `renumber` prefixed a quoted id rather than reading through
+  the quotes, so `id: '1-example'` became `id: 1-'1-example'` — a
+  different anchor, and every link to that slide broken.
+- **Fixed:** a link to a slide whose id is not plain ASCII opened the
+  wrong slide. `#2-café` travels as `#2-caf%C3%A9`, which matched no id,
+  so the deck opened at the start and then rewrote the address bar,
+  losing the link. The fragment is now decoded before it is matched, and
+  encoded when the deck writes it, so an id holding what looks like an
+  escape — `2-100%20` — is read back as the name it is rather than as
+  `2-100 `.
+- **Fixed:** the presenter window called itself live before any deck had
+  answered it. The page paints itself on load and the paint was what
+  marked it live, so a `/presenter` opened with no deck behind it sat
+  showing the first slide's script instead of the warning that the deck
+  is not answering. Only a message from a deck marks it live now.
+- **Changed:** the server closes its file watchers when it closes, and
+  asked for port 0 names the port it was actually given.
+
 ## 0.3.0 — 2026-09-20
 
 - **Fixed:** the docked notes announced themselves as a window. Whether

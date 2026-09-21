@@ -64,6 +64,8 @@ the same one.
 | `sipario new [dir]` | start a talk in `[dir]`, or in `./talk` |
 | `sipario serve [dir]` | render the folder holding `deck.md`, or `./talk`, reloading on save |
 | `sipario renumber <deck.md>` | rewrite slide numbers and id prefixes from position |
+| `sipario export pdf [dir]` | the deck as a PDF, a page per step, at the stage's size |
+| `sipario export pptx [dir]` | the deck as PowerPoint, a picture per step, the script in its notes |
 
 `sipario-serve` and `sipario-renumber` are the same two commands under
 their own names, for the talks that already have them in their npm
@@ -179,16 +181,53 @@ itself would put your script on whatever screen the deck is being shared
 to. Docked and detached are the same page, an iframe on `/presenter`, so
 a fix to one cannot miss the other.
 
+## On paper, and in PowerPoint
+
+```bash
+npx sipario export pdf          # ./my-talk.pdf, a page per step
+npx sipario export pptx         # ./my-talk.pptx, a picture per step, the script in its notes
+```
+
+Both are photographs of the deck as the room sees it, taken by a browser
+already on the machine. The talk is served on a port of its own, the
+browser is pointed at `/print`, where every step of every slide sits in
+the flow at the stage's own size, and it prints or photographs that page:
+the same markup, the same sheets and the same fonts the deck runs on, so
+neither file can disagree with the room. A step is a page. A build of
+four steps is four pages, each showing what the room saw at that step,
+with the slide's number in the corner where the compass carries it.
+
+The PowerPoint deck is pictures, not text boxes: a template is HTML and
+CSS, and there is no faithful translation of either into what PowerPoint
+draws. What travels as text is the script, every step's ```notes block
+in the notes pane of its slide, which is what a deck handed to an
+organiser is usually for. The slide is 13.33 by 7.5 inches, PowerPoint's
+own 16:9, and each picture is the stage at twice its size.
+
+It borrows Chrome, Chromium, Brave or Edge from wherever one is installed
+and refuses by name if none is; `SIPARIO_BROWSER=/path/to/one` points it
+at a browser somewhere unusual. Nothing is downloaded and nothing is added
+to the talk. `-o file` names the output; otherwise the file is named
+after the deck and lands in the folder the command ran from, never in the
+talk. The export refuses rather than shipping a file that is wrong only to
+look at: a step the talk's sheets hide on paper, a PDF that comes back a
+page short, a figure that does not load and would print as a hole, and a
+save landing mid-export, which would pair this draft's pictures with the
+last one's scripts.
+
 ## Using it as a library
 
 ```js
-const { render, talk, serve, talkChecks } = require('sipario');
+const { render, talk, serve, talkChecks, exportPdf, exportPptx } = require('sipario');
 const fs = require('fs');
 
 const t = talk('./talk');
 const { html, deck, slides, steps } = render(fs.readFileSync(t.deck, 'utf8'), t);
 
 serve('./talk', { port: 9999 });
+
+await exportPdf('./talk', { out: 'deck.pdf' });     // { file, pages, ... }
+await exportPptx('./talk', { out: 'deck.pptx' });   // { file, slides, ... }
 ```
 
 `talk()` returns the three paths `render` needs. There is no default:
@@ -197,6 +236,10 @@ else's slides and succeed.
 
 `scaffold(dir)` is what `sipario new` does: the copy, the rename, and the
 read-back that proves the rename landed.
+
+`outline(src, t)` is the deck as the export reads it: every step in
+order with its id, its slide's number and title, its place in the build
+and its script as text.
 
 `talkChecks(t)` is the list of checks any talk has to pass — its
 templates compile, every class one writes has a rule and every rule a
@@ -215,7 +258,7 @@ way and both are one assertion in there: the slide off-centre when stacks
 became grid items, and the slide unscaled when a leftover call to a
 deleted function killed the script on its first line.
 
-The loop around that suite, what the 173 checks cover, and what to run
+The loop around that suite, what the 217 checks cover, and what to run
 before calling a change done: [`docs/DEVELOPING.md`](docs/DEVELOPING.md).
 
 ## What it does not do
@@ -224,7 +267,9 @@ No build step, so there is no artefact to go stale. No dependencies: the
 server is Node's own `http`, and the format is hand-parsed because a
 general markdown parser has to be fought back into these shapes, and the
 failure mode of fighting it is a slide that renders plausibly and
-wrongly. No PDF export, no themes, no plugin API.
+wrongly. No themes, no plugin API. The export is a photograph of the
+deck, not a translation of it: there is no PowerPoint whose words you
+can edit, only one whose notes you can read.
 
 ## Releasing
 

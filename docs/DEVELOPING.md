@@ -65,9 +65,9 @@ to exactly what the lockfile says.
 | Path | Holds |
 |---|---|
 | `index.js` | the public surface: everything a consumer may require |
-| `lib/` | the parser and renderer, the template engine, the shared checks, the CLI, the server |
+| `lib/` | the parser and renderer, the template engine, the shared checks, the CLI, the server, and the export: the browser driver, the .pptx writer and the two commands over them |
 | `js/` | what runs in the browser: `deck.js` in the room, `presenter.js` in the notes |
-| `css/` | the frame's stylesheet and the presenter's, and no talk's design |
+| `css/` | the frame's stylesheet, the presenter's and the print page's, and no talk's design |
 | `bin/` | argv, and nothing else; the commands are in `lib/cli.js` |
 | `docs/` | the format, writing a template, and the calls behind the engine |
 | `starters/minimal/` | the shortest complete talk |
@@ -87,9 +87,12 @@ like, so change the engine instead unless the example is what is wrong.
 npm test
 ```
 
-146 checks, one line each, with a count at the end and exit status 1 if
+217 checks, one line each, with a count at the end and exit status 1 if
 any failed. Nothing stops at the first failure: every check runs, so one
-broken thing does not hide the next.
+broken thing does not hide the next. One check needs a browser on the
+machine, exports the example both ways and reads the files back; with no
+Chrome, Chromium, Brave or Edge to be found it prints a line saying so
+and is not counted either way.
 
 Broadly, what they cover:
 
@@ -103,6 +106,7 @@ Broadly, what they cover:
 | the format | front matter, scripts, and every renamed or unknown key refused by name rather than ignored |
 | the template engine | a folder is read and compiled once, two talks load apart, and a template the talk has no file for is refused with the set named |
 | the CLI | `new` copies the example, renames it from the folder and refuses a folder that already holds something; the old bin names still run |
+| on paper | the print page carries every step in order and no runtime, the export reads the deck in that order with each script as text, a .pptx names every part it holds and every relationship in it resolves, the browser is found or the error says how to name one, and an export refuses a missing figure, a save mid-run, or no browser without leaving a server behind |
 | the frame | it names no template of the talk it is serving, its `url()`s resolve, its colours are named for their job, and the talk's sheet loads last |
 | any talk | `talkChecks`, run over `starters/minimal` and again over `starters/stylish` |
 
@@ -171,6 +175,8 @@ before calling it done.
   anything outside Node; the server is `node:http`, and the file serving
   it needs sits beside the routes in `server.js`. `jsdom` is a devDependency the
   suite alone reaches for, and the suite checks the rest of this claim.
+  The export borrows a browser installed on the machine, driven over its
+  own DevTools protocol with Node's WebSocket, and ships none.
 - **Errors stop the render.** A standfirst on a slide whose template never
   prints one, a step restating a line already on the stage, a layer name
   absent from the SVG, an id in the wrong section: each one stops the

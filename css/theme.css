@@ -668,7 +668,9 @@ body.help #help { display: grid; }
 #help dt { font-family: var(--mono); color: var(--accent-lit); }
 #help dd { margin: 0; }
 
-@media print { body { overflow: visible; } .slide { display: block; page-break-after: always; } }
+/* The deck page does not print: every slide is fixed to the same spot,
+   and a print rule that unhid them all stacked 43 on one page. The page
+   that prints is /print, laid out by css/print.css. */
 
 /* --------------------------------------------------------- the check */
 
