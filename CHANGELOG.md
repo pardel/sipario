@@ -4,7 +4,7 @@ Newest first, one line per thing somebody using sipario would notice.
 Every break is stated as a break: before 1.0 there is no major to spend,
 so a break ships as a minor and this file is the whole of the warning.
 
-## Unreleased
+## 0.4.0 — 2026-09-21
 
 - **Added:** `sipario export pdf` and `sipario export pptx`. The deck as
   a PDF, a page per step at the stage's size, and as a PowerPoint deck of
