@@ -293,6 +293,10 @@ body:has(.slide.is-dark.current) #steps { --steps-ink: var(--ink-lit-dimmer); }
 
 body.overview #steps { display: none; }
 
+/* The minimap's lit cell fills as a build plays, which is where the
+   presenter is already looking; the dots only speak when it is off. */
+body.minimap #steps { display: none; }
+
 #progress {
   position: fixed;
   left: 0; right: 0; bottom: 0;
@@ -624,7 +628,16 @@ body:has(.slide.is-dark.current) #minimap { --minimap-ink: var(--ink-lit-faint);
 
 .mm-cell.build { box-shadow: inset 0 0 0 1px var(--minimap-ink), inset 0 -3px 0 -2px var(--minimap-ink); }
 
-.mm-cell.on { background: var(--minimap-lit); box-shadow: none; opacity: 1; }
+/* The lit cell fills left to right as a build plays, `--fill` being the
+   share of its steps shown so far: half a cell at step one of two, the
+   whole cell at the last step and on any slide that does not animate. The
+   outline stays lit so the unfilled part still reads as the cell you are on.
+   With the map showing, this is the build signal and the dots stand down. */
+.mm-cell.on {
+  background: linear-gradient(90deg, var(--minimap-lit) var(--fill, 100%), transparent var(--fill, 100%));
+  box-shadow: inset 0 0 0 1px var(--minimap-lit);
+  opacity: 1;
+}
 
 /* ------------------------------------------------------- the reset ask
  *

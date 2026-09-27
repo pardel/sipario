@@ -4,6 +4,13 @@ Newest first, one line per thing somebody using sipario would notice.
 Every break is stated as a break: before 1.0 there is no major to spend,
 so a break ships as a minor and this file is the whole of the warning.
 
+## Unreleased
+
+- **Changed:** on a slide that builds, the minimap's lit cell fills left
+  to right as the steps play (half a cell at step one of two), in the
+  deck and in the notes. While the map is showing, the step dots at the
+  foot of the screen are hidden; with the map off (M) they come back.
+
 ## 0.4.0 — 2026-09-21
 
 - **Added:** `sipario export pdf` and `sipario export pptx`. The deck as

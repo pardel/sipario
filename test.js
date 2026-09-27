@@ -330,6 +330,22 @@ check('the minimap draws the talk\'s shape and marks the slide you are on', () =
   eq(doc.body.classList.contains('minimap'), false, 'M again hides it');
 });
 
+check('the minimap\'s lit cell fills as a build plays, and stands the dots down', () => {
+  const { doc, key, forget } = MOVES;
+  const mm = doc.getElementById('minimap');
+  const fill = () => mm.querySelector('.mm-cell.on').style.getPropertyValue('--fill');
+  forget();
+  eq(fill(), '100%', 'a slide that does not animate is lit whole');
+  key('ArrowRight');
+  key('ArrowDown');
+  eq(fill(), '50%', 'step one of a two-step build lights half the cell');
+  key('ArrowDown');
+  eq(fill(), '100%', 'and the last step lights all of it');
+  eq(/\.mm-cell\.on\s*\{[^}]*var\(--fill/.test(css), true, 'the lit cell is painted from --fill');
+  eq(/body\.minimap #steps\s*\{\s*display:\s*none/.test(css), true,
+     'the dots stand down while the map is showing');
+});
+
 check('the compass lights only the live directions', () => {
   const { window, doc, current, key, forget } = MOVES;
   /* Left and right are the movements; down and up are the slides inside

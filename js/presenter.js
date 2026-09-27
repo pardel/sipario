@@ -280,7 +280,10 @@
 
     elMap.querySelectorAll(".mm-cell.on").forEach(function (el) { el.classList.remove("on"); });
     var cell = elMap.querySelector('.mm-cell[data-g="' + g + '"][data-s="' + s + '"]');
-    if (cell) cell.classList.add("on");
+    if (cell) {
+      cell.classList.add("on");
+      cell.style.setProperty("--fill", ((st.indexOf(here) + 1) / st.length * 100) + "%");
+    }
 
     /* Where the deck is used to be spelled out here as a movement, a
        slide number and a dot per step. It is gone: the deck's own

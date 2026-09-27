@@ -479,7 +479,10 @@
     cnum.textContent = here.dataset.n;
     minimap.querySelectorAll(".mm-cell.on").forEach(function (el) { el.classList.remove("on"); });
     var cell = minimap.querySelector('.mm-cell[data-g="' + g + '"][data-s="' + s + '"]');
-    if (cell) cell.classList.add("on");
+    if (cell) {
+      cell.classList.add("on");
+      cell.style.setProperty("--fill", ((y + 1) / stack().length * 100) + "%");
+    }
     /* The map marks the slide you are on by its number as well as its
        outline, since the outline is easy to lose among 43 thumbnails. */
     deck.querySelectorAll(".stack.current-stack")
