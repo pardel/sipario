@@ -4,7 +4,7 @@ Newest first, one line per thing somebody using sipario would notice.
 Every break is stated as a break: before 1.0 there is no major to spend,
 so a break ships as a minor and this file is the whole of the warning.
 
-## Unreleased
+## 0.5.0 — 2026-09-30
 
 - **Added:** the notes on another device. `serve` makes a secret link
   each run, prints it, and the notes on the speaker's machine show it
