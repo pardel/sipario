@@ -316,6 +316,25 @@ first private address on a real interface; never loopback or link-local.
 names another, for a machine whose choice is wrong. For a relay
 elsewhere, the code is of the relay's address.
 
+**Phones on another network.** Conference Wi-Fi often keeps its clients
+from reaching each other, and a phone on mobile data cannot reach the
+laptop at all. A tunnel fixes both: run one (Cloudflare's `cloudflared`,
+say) from a public name to the phones' port, one above the deck's, and
+give `serve` that name:
+
+```bash
+SIPARIO_JOIN_URL=https://room.example.com npx sipario serve
+```
+
+The banner, the QR code and the address under it then carry it, and the
+banner names the port the tunnel must reach. It is an origin and nothing
+after it: the phone page asks for its stream and slides from the root.
+Anything else is said in the banner and the address on this network is
+used instead. Point the tunnel at the phones' port alone: it answers the
+phone page, its stream and slides the room has already seen, and the
+deck's own port, with the notes and the controls, stays this machine's.
+The laptop still needs the internet; a phone's hotspot will do.
+
 The room follows one deck window, however many are open: the first to
 open, until another goes full screen or is given `H`. Leaving full screen
 keeps it; a window that closes gives it up after a few seconds, and the

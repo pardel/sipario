@@ -4,6 +4,15 @@ Newest first, one line per thing somebody using sipario would notice.
 Every break is stated as a break: before 1.0 there is no major to spend,
 so a break ships as a minor and this file is the whole of the warning.
 
+## Unreleased
+
+- **Added:** `SIPARIO_JOIN_URL` (or `joinUrl` to `serve()`), the whole
+  address phones join at, for a tunnel from a public name to the phones'
+  port: phones on mobile data or on a Wi-Fi that keeps its clients apart
+  join at `https://room.example.com/` rather than a LAN address. The
+  banner names the port to point it at; an address with a path or no
+  scheme is said and the LAN address used. The notes' link is unchanged.
+
 ## 0.5.0 — 2026-09-30
 
 - **Added:** the notes on another device. `serve` makes a secret link

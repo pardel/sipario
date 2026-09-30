@@ -3223,6 +3223,52 @@ check('the join address is the room\'s network, not a VPN\'s or a bridge\'s, unl
      'and serve()\'s own joinHost over that');
 });
 
+check('a tunnel\'s address is the join address when given, an origin and nothing after it', () => {
+  const { joinUrl } = require('./lib/server.js');
+  eq(joinUrl({ env: {} }), null, 'nothing given, nothing taken');
+  eq(joinUrl({ env: { SIPARIO_JOIN_URL: 'https://room.example.com' } }).url, 'https://room.example.com/',
+     'SIPARIO_JOIN_URL is taken, with its slash');
+  eq(joinUrl({ env: { SIPARIO_JOIN_URL: 'https://a.example.com/' }, given: 'https://b.example.com/' }).url,
+     'https://b.example.com/', 'and serve()\'s own joinUrl over that');
+  for (const bad of ['room.example.com', 'ftp://room.example.com/', 'https://room.example.com/talk',
+                     'https://room.example.com/?x=1']) {
+    eq(typeof joinUrl({ env: { SIPARIO_JOIN_URL: bad } }).error, 'string', `${bad} is refused`);
+  }
+
+  /* Served: the phones are told the tunnel's address, the banner says
+     where it came from and which port to point the tunnel at, a bad one
+     is said and the LAN address used, and the notes' link is untouched. */
+  const probe = `
+    const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib', 'server.js'))});
+    const up = (srv) => new Promise((ok) => srv.listening ? ok() : srv.once('listening', ok));
+    (async () => {
+      const out = {};
+      for (const [k, joinUrl] of [['good', 'https://room.example.com'], ['bad', 'https://room.example.com/talk']]) {
+        const said = [];
+        const log = { log(m) { said.push(m); }, warn(m) { said.push(m); }, error(m) { said.push(m); } };
+        const s = serve(${JSON.stringify(path.join(ROOT, 'starters', 'minimal'))}, { port: 0, log, joinUrl });
+        await up(s); await up(s.room.server);
+        await new Promise((ok) => setTimeout(ok, 300));
+        out[k] = { join: s.room.join(), port: s.room.port, said };
+        s.room.relay.close(); s.close(); if (s.closeAllConnections) s.closeAllConnections();
+      }
+      console.log(JSON.stringify(out));
+      process.exit(0);
+    })().catch((e) => { console.log(JSON.stringify({ error: e.message })); process.exit(0); });
+  `;
+  const run = require('child_process').spawnSync(process.execPath, ['-e', probe], { encoding: 'utf8', timeout: 30000 });
+  const out = JSON.parse(run.stdout.trim().split('\n').pop());
+  if (out.error) throw new Error(out.error);
+  eq(out.good.join, 'https://room.example.com/', 'phones are told the tunnel\'s address');
+  const banner = out.good.said.find((m) => /phones join at/.test(m)) || '';
+  eq(banner.includes('https://room.example.com/') && banner.includes(`port ${out.good.port}`), true,
+     `the banner names it and the port it reaches (${banner})`);
+  eq(/^http:\/\/[^/]+:\d+\/$/.test(out.bad.join), true, 'a bad one falls back to this network\'s address');
+  eq(out.bad.said.some((m) => /must be an origin alone/.test(m)), true, 'and says why');
+  eq(out.good.said.some((m) => /room\.example\.com/.test(m) && /presenter/.test(m)), false,
+     'the notes\' link never carries it');
+});
+
 check('the deck draws the join code wherever a template marks one, and nowhere on paper', () => {
   const relay = createRelay({ deck: 'Moves', throttle: 0, tick: 0, join: () => 'http://192.168.1.7:10000/' });
   const r = render(inRoom(MOVES_SRC), TALK);

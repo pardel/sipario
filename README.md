@@ -205,6 +205,11 @@ Any number of deck windows may be open, but the room follows one: the
 first to open, until another goes full screen or is given <kbd>H</kbd>, and
 the notes say which. A second tab opened to check a slide moves nothing on
 anyone's phone.
+A venue's Wi-Fi often keeps its clients apart, and a phone on mobile data
+never reaches your laptop's network: point a tunnel (Cloudflare's
+`cloudflared`, say) at the phones' port and set
+`SIPARIO_JOIN_URL=https://room.example.com` so the code carries its
+address. Only the phones' listener goes through it, never the deck's.
 `sipario results` writes what the room said as JSON and CSV. No accounts,
 no names, no addresses kept. The keys, the blocks and where results live:
 [`docs/AUTHORING.md`](docs/AUTHORING.md#the-room).
@@ -320,7 +325,7 @@ way and both are one assertion in there: the slide off-centre when stacks
 became grid items, and the slide unscaled when a leftover call to a
 deleted function killed the script on its first line.
 
-The loop around that suite, what the 286 checks cover, and what to run
+The loop around that suite, what the 287 checks cover, and what to run
 before calling a change done: [`docs/DEVELOPING.md`](docs/DEVELOPING.md).
 
 ## What it does not do
