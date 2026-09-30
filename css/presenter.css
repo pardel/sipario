@@ -321,3 +321,119 @@ body.orphan:not(.live) #orphan { display: grid; }
 }
 body.fault #fault { display: block; }
 
+
+/* ---- the notes on another device -------------------------------------
+   On this machine, a control under the clock that shows the link and its
+   QR code when asked, and makes a new one. The code is drawn on the
+   slide's own light ground, since a scanner wants dark on light. */
+
+#remote-btn {
+  padding: 5px 11px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-lit-faint);
+  background: none;
+  border: 1px solid var(--hairline-deep);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#remote-btn:hover,
+#remote-btn[aria-expanded="true"] { color: var(--ink-lit); border-color: var(--hairline-deep-lit); }
+
+#remote-panel { margin-top: 10px; max-width: 240px; }
+
+#remote-qr {
+  width: 180px;
+  padding: 8px;
+  border-radius: 4px;
+  background: var(--ground);
+  color: var(--ink);
+}
+
+#remote-qr:empty { display: none; }
+#remote-qr svg { display: block; width: 100%; height: auto; }
+
+#remote-url {
+  display: block;
+  margin: 8px 0 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-lit);
+  word-break: break-all;
+  user-select: all;
+}
+
+#remote-panel p { margin: 0 0 8px; font-size: 11px; color: var(--ink-lit-dim); }
+
+#remote-rotate {
+  padding: 4px 9px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--ink-lit-faint);
+  background: none;
+  border: 1px solid var(--hairline-deep);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#remote-rotate:hover { color: var(--ink-lit); border-color: var(--hairline-deep-lit); }
+
+/* On the device: what it has to say (the deck gone, the link cut off)
+   wraps rather than being cut short, since there is no tooltip under a
+   thumb; and the buttons that move the deck sit under the script, wide
+   enough to hit without looking. */
+#remote-status { white-space: normal; }
+#notes-bar:has(#remote-status:not(:empty)) { flex-wrap: wrap; }
+#remote-status:not(:empty) { flex: 1 1 100%; margin-left: 0; }
+
+body.cut #remote-status {
+  position: fixed;
+  inset: 0;
+  z-index: 11;
+  display: grid;
+  place-items: center;
+  padding: 10vh 10vw;
+  text-align: center;
+  font-size: 17px;
+  color: var(--ink-lit);
+  background: var(--ground-deep);
+}
+
+#remote-controls {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1.6fr 1.6fr 1fr;
+  gap: 8px;
+  padding: 10px 12px 14px;
+  border-top: 1px solid var(--hairline-deep);
+}
+
+#remote-controls button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 56px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink-lit);
+  background: var(--ground-panel);
+  border: 1px solid var(--hairline-deep);
+  border-radius: 8px;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#remote-controls [data-command="next"] {
+  color: var(--ground-deep);
+  background: var(--accent-lit);
+  border-color: var(--accent-lit);
+}
+
+#remote-controls button:active { transform: translateY(1px); border-color: var(--ink-lit); }
+#remote-controls button:focus-visible { outline: 2px solid var(--accent-lit); outline-offset: 2px; }

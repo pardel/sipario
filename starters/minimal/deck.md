@@ -36,7 +36,7 @@ align: tight
 - (slate) `Enter` In the overview, show the selected slide
 - (slate) `M` A map of the talk in the corner, here and in the notes, marking where you are
 - (slate) `F` Full screen; docked notes move to their own window first
-- (slate) `H` Make this window the one the room's phones follow
+- (slate) `H` Make this window the one the phones and a remote follow
 - (slate) `C` Check every slide for content running off the stage
 - (slate) `R` Back to the start, forgetting where each movement was left
 - (slate) `?` This help

@@ -204,7 +204,7 @@
     "<dt>Enter</dt><dd>In the overview, show the selected slide</dd>" +
     "<dt>M</dt><dd>A map of the talk in the corner, here and in the notes, marking where you are</dd>" +
     "<dt>F</dt><dd>Full screen; docked notes move to their own window first</dd>" +
-    "<dt>H</dt><dd>Make this window the one the room's phones follow</dd>" +
+    "<dt>H</dt><dd>Make this window the one the phones and a remote follow</dd>" +
     "<dt>C</dt><dd>Check every slide for content running off the stage</dd>" +
     "<dt>R</dt><dd>Back to the start, forgetting where each movement was left</dd>" +
     "<dt>?</dt><dd>This help</dd>" +

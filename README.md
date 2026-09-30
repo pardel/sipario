@@ -162,7 +162,7 @@ template: [`docs/TEMPLATES.md`](docs/TEMPLATES.md).
 | <kbd>T</kbd> | the clock: start, pause, then reset |
 | <kbd>R</kbd> | forget where each movement was left |
 | <kbd>F</kbd> | full screen; with the notes docked, the first press moves them to a window of their own, so the script never reaches the projector, and the second goes full screen |
-| <kbd>H</kbd> | in a talk with a room, make this window the one the phones follow; going full screen does the same |
+| <kbd>H</kbd> | make this window the one the room's phones, and the notes on another device, follow; going full screen does the same |
 | <kbd>C</kbd> | measure every step against the stage and name what overflows |
 
 The slides move the way the deck does. Press <kbd>→</kbd> and the slide
@@ -183,7 +183,8 @@ The notes are off until asked for, deliberately: a panel that opened by
 itself would put your script on whatever screen the deck is being shared
 to. Docked and detached are the same page, an iframe on `/presenter`, so
 a fix to one cannot miss the other. The notes, and the print page, are
-served to the machine running `serve` and to nothing else: the deck may be
+served to the machine running `serve` and to nothing else, but for the
+notes on a device holding their secret link (below): the deck may be
 opened from another machine to mirror the room's screen, but it arrives
 there without its script.
 
@@ -207,6 +208,31 @@ anyone's phone.
 `sipario results` writes what the room said as JSON and CSV. No accounts,
 no names, no addresses kept. The keys, the blocks and where results live:
 [`docs/AUTHORING.md`](docs/AUTHORING.md#the-room).
+
+**The notes open on another device**: a phone or a tablet at the lectern,
+or a second laptop. `sipario serve` prints a link, and the notes on your
+machine show it too, with a QR code, under the clock ("On another
+device"). Opened there, it is the notes page itself: previews, script,
+clock and map, following the deck as it moves, whether it is moved from
+the laptop or from the device. Large buttons move it by touch, Back and
+Next a step at a time and the outer two a movement at a time; the arrows
+and Page Up and Page Down do the same from a keyboard or a clicker. The
+clock is one clock, started, paused or reset from either end. The device
+follows, and moves, the deck window that holds the room, the first to
+open until another goes full screen or is given <kbd>H</kbd>, in a talk
+with a room or without one. If that window goes, the device says so and
+keeps the last slide. Anyone without the link gets what they got before:
+`/presenter` does not exist for them, and the deck arrives without its
+script.
+
+**The link is a password.** Anyone who has it can read your script and
+move your deck. It travels as plain HTTP over the local network, so on an
+open conference Wi-Fi someone watching the traffic could capture it.
+"New link", beside it in the notes, makes another and cuts off anything
+using the old one at once: press it after the talk, and do not use the
+link on a network you do not trust. The device also has to be able to
+reach your machine: a phone on mobile data cannot reach a laptop on the
+venue's Wi-Fi, and a network that keeps its clients apart stops it too.
 
 The example talk opens the room, so a talk started from it does too;
 delete the `audience:` line, the poll slide and the ```` ```feedback ````
@@ -294,7 +320,7 @@ way and both are one assertion in there: the slide off-centre when stacks
 became grid items, and the slide unscaled when a leftover call to a
 deleted function killed the script on its first line.
 
-The loop around that suite, what the 278 checks cover, and what to run
+The loop around that suite, what the 286 checks cover, and what to run
 before calling a change done: [`docs/DEVELOPING.md`](docs/DEVELOPING.md).
 
 ## What it does not do

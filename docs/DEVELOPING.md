@@ -68,8 +68,8 @@ to exactly what the lockfile says.
 | Path | Holds |
 |---|---|
 | `index.js` | the public surface: everything a consumer may require |
-| `lib/` | the parser and renderer, the template engine, the shared checks, the CLI, the server, and the export: the browser driver, the .pptx writer and the two commands over them. The room: `relay.js` (the protocol and its state), `pace.js` (the pace rule, alone) and `results.js` (where sessions live, and the JSON and CSV) |
-| `js/` | what runs in the browser: `deck.js` in the room, `presenter.js` in the notes, `audience.js` in both for a deck that opens the room, `qr.js`, which draws the join code there and loads under Node for the suite, and `phone.js` on the audience's phones |
+| `lib/` | the parser and renderer, the template engine, the shared checks, the CLI, the server, and the export: the browser driver, the .pptx writer and the two commands over them. The room: `relay.js` (the protocol and its state), `pace.js` (the pace rule, alone) and `results.js` (where sessions live, and the JSON and CSV). The notes on another device: `remote.js` (the link's key, and the channel between a device and the deck window it drives) |
+| `js/` | what runs in the browser: `deck.js` in the room, `presenter.js` in the notes, `audience.js` in both for a deck that opens the room, `qr.js`, which draws the join code there and the notes' link in the notes, and loads under Node for the suite, `phone.js` on the audience's phones, and `remote.js`, the three ends of the notes on another device: the deck here, the link in the notes here, and the notes there |
 | `css/` | the frame's stylesheet, the presenter's, the print page's and the phone page's, and no talk's design |
 | `bin/` | argv, and nothing else; the commands are in `lib/cli.js` |
 | `docs/` | the format, writing a template, and the calls behind the engine |
@@ -90,18 +90,19 @@ like, so change the engine instead unless the example is what is wrong.
 npm test
 ```
 
-278 checks, one line each, with a count at the end and exit status 1 if
+286 checks, one line each, with a count at the end and exit status 1 if
 any failed. Nothing stops at the first failure: every check runs, so one
 broken thing does not hide the next. Five checks need a browser on the
 machine: three export the example both ways and read the files back, and
 break a copy of it to see the export refuse, one photographs each
 starter's title slide and reads its QR code off the picture, and one lays
 out every build step on the stage and in a phone's copy and compares
-them. One needs a
-network address of the machine's own, to ask a served talk for its script
-as another machine would. A check that cannot run prints a line saying
-why and is not counted either way, so a machine with no browser runs 273
-and one with no network as well runs 272.
+them. Three need a
+network address of the machine's own, to ask a served talk for its script,
+and for the notes behind their link, as another machine would. A check
+that cannot run prints a line saying why and is not counted either way, so
+a machine with no browser runs 281 and one with no network as well runs
+278.
 
 The suite writes a room's sessions to a scratch `SIPARIO_DATA` of its
 own, so running it leaves nothing among your real ones.
@@ -115,6 +116,7 @@ Broadly, what they cover:
 | builds and figures | a step adds rather than restates, height is reserved so nothing shifts, a layered SVG reveals one group per step, and a misspelt layer name stops the render |
 | ids and numbers | every slide declares both, a number or a section that disagrees with where the slide sits stops the render, and `renumber` agrees with the renderer |
 | the presenter window | docked and detached are the same page, the channel between the two windows carries both directions, the reset asks before forgetting, and the script is served to this machine alone |
+| the notes on another device | the link's key taken whole or not at all and replaced on request, a device moving the deck window that holds the room and no other and following it however it is moved, one clock between the device and the laptop, the link shown on this machine's notes alone, and, over the network with and without a room, nothing answered without the key and the key in nothing an attendee can fetch |
 | the room | `audience:` and its refusals, a deck without it making no request, the relay's limits and one vote a phone, the pace rule's contract, the deck, presenter and phone pages run against an in-process relay, polls and the feedback form refused by name, the phones' listener refusing everything but the room, and `results` read back from a served session |
 | the format | front matter, scripts, and every renamed or unknown key refused by name rather than ignored |
 | the template engine | a folder is read and compiled once, two talks load apart, and a template the talk has no file for is refused with the set named |

@@ -345,6 +345,48 @@ the room's two routes and nothing else. `/presenter`, `/print` and every
 file of the talk stay off the network. A relay that cannot be reached is
 said once, in the presenter window, and the talk carries on.
 
+### The notes on another device
+
+Every run of `sipario serve` also opens the notes to one more device, a
+phone or a tablet at the lectern or a second laptop, behind a link made
+for that run:
+
+```
+[remote] the notes on another device: http://192.168.1.7:52814/presenter?key=…
+```
+
+The notes on your machine show the same link under the clock, "On
+another device", with a QR code to open it by. It is the notes page
+itself, following the deck, with large buttons to move it by touch: Back
+and Next a step, the outer two a movement. The arrows and Page Up and
+Page Down work from a keyboard or a clicker paired with the device. The
+clock is shared: start, pause or reset it at either end and the other
+follows, and a reset takes the deck back to the start, as it does from the
+notes here.
+
+The device follows the deck window that holds the room, and moves no
+other: the first to open, until another goes full screen or is given `H`.
+The rule is the same with no `audience:` in the deck. If that window goes,
+the device says so and keeps the last slide. Any number of devices may
+open the link, and each of them follows and drives.
+
+It has a port of its own, chosen when `serve` starts, which answers
+nothing at all without the key: not the notes, not their files, not even a
+front page. The address is chosen as the join address is, and
+`SIPARIO_JOIN_HOST` moves it the same way. `/print` is not on it, and
+stays this machine's alone.
+
+**The link is a password.** Anyone who has it can read your script and
+move your deck. It travels as plain HTTP over the local network, so on an
+open conference Wi-Fi someone watching the traffic could capture it.
+"New link" makes another and cuts off every device using the old one at
+once, and the next run of `serve` makes another anyway. Make a new one
+after the talk, or before it if the link has been anywhere you did not
+mean it to go, and do not use it on a network you do not trust. The
+device has to reach your machine, too: a phone on mobile data cannot
+reach a laptop on the venue's Wi-Fi, and a network that keeps its clients
+apart from each other stops it as well.
+
 ### A poll
 
 A fenced block in the step that puts the question, beside its script:

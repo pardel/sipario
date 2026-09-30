@@ -6,6 +6,27 @@ so a break ships as a minor and this file is the whole of the warning.
 
 ## Unreleased
 
+- **Added:** the notes on another device. `serve` makes a secret link
+  each run, prints it, and the notes on the speaker's machine show it
+  under the clock with a QR code. Opened on a phone, a tablet or a second
+  laptop, it is the notes page itself, following the deck, with large
+  buttons to move it by touch and the usual keys. It drives the deck window
+  that holds the room (`H` or full screen, else the first to open), with
+  or without a room, and no other; the clock is one clock at both ends. A
+  device whose deck has gone says so and keeps the last slide.
+- **Added:** "New link" in the notes makes another and cuts off every
+  device using the old one at once. The link is a password, carried in
+  plain HTTP on the local network: README and AUTHORING say what that
+  means on a conference's Wi-Fi.
+- **Changed:** `/presenter` is reachable from other machines with the
+  key, on a listener of its own that answers nothing without it, in a
+  talk with a room and without one. Without the key nothing an attendee
+  could reach before has changed, and `/print` stays this machine's alone.
+  `serve()` takes `remote: false` to open no such listener (the export
+  does), and the server's `remote` names it. `H` now also chooses which
+  window the device follows; the help and both starters' keys slides say
+  so. `createRelay` takes `held`, told whenever the window holding the
+  room changes.
 - **Added:** the room. `audience: local` in a deck's head, and `serve`
   runs a relay and a listener for phones on the same network, one port
   above the deck's, and prints the address to join at. The phones follow

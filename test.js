@@ -4015,6 +4015,548 @@ check('over the network a deck window that does not hold the room cannot make a 
   eq(out.pollAfter, 'how-you-present', 'and its poll');
 });
 
+// ------------------------------------------- the notes on another device
+
+/* The notes page on a phone or a tablet, reached by a secret link, and
+ * the deck moved from there. The hub is state in this process, so its
+ * rules are checked by calling it; the pages are run in jsdom with their
+ * requests and streams wired straight to it; and the server is started
+ * in a process of its own and asked over this machine's own network
+ * address, as another device would ask it. */
+
+const { createRemote } = require('./lib/remote.js');
+const remoteJs = fs.readFileSync(path.join(ROOT, 'js/remote.js'), 'utf8');
+const qrJs = fs.readFileSync(path.join(ROOT, 'js/qr.js'), 'utf8');
+
+/* A window whose requests reach `hub` as the server would hand them over.
+   Its streams connect once its scripts have run, as a stream connects
+   after the script that opened it; `connect()` again after a page opens
+   another. `before(w, timers)` may keep the page's timers to run by hand. */
+function hubWindow(body, scripts, hub, { bus = makeBus(), url = 'http://localhost:9999/', before, fetch } = {}) {
+  const streams = [];
+  const posted = [];
+  const timers = [];
+  const win = windowFor(body, scripts, bus, url, (w) => {
+    if (before) before(w, timers);
+    w.fetch = (u, init) => {
+      const msg = init && init.body ? JSON.parse(init.body) : null;
+      posted.push({ url: u, msg });
+      if (fetch) return fetch(u, init);
+      const r = u.startsWith('/remote/window') ? hub.fromWindow(msg)
+        : u.startsWith('/remote/command') ? hub.fromDevice(msg) : { status: 404, body: {} };
+      return Promise.resolve({ ok: r.status === 200, status: r.status, json: () => Promise.resolve(r.body) });
+    };
+    w.EventSource = function (u) {
+      this.url = u;
+      this.readyState = 1;
+      this.close = () => { if (this.off) this.off(); this.readyState = 2; };
+      streams.push(this);
+    };
+  });
+  const connect = () => streams.forEach((es) => {
+    if (es.off || es.readyState === 2) return;
+    const deliver = (event) => { if (es.onmessage) es.onmessage({ data: JSON.stringify(event) }); };
+    if (es.url.startsWith('/remote/window')) {
+      es.off = hub.onWindow(new URL(es.url, 'http://x').searchParams.get('window'), deliver);
+    } else if (es.url.startsWith('/remote/stream')) {
+      es.off = hub.onDevice(deliver, () => { es.off(); es.readyState = 2; });
+    }
+  });
+  connect();
+  const key = (k) => win.document.dispatchEvent(new win.KeyboardEvent('keydown', { key: k }));
+  return { win, streams, posted, timers, connect, key };
+}
+
+const REMOTE_DECK = bodyOf(pagesLib.deckPage(MOVES_DECK, { remote: true }));
+const DEVICE_PAGE = bodyOf(pagesLib.presenterPage(MOVES_DECK, 9999, '', 'device'));
+const NOTES_PAGE = bodyOf(pagesLib.presenterPage(MOVES_DECK, 9999, '', 'notes'));
+
+check('the link is a secret of 192 bits, taken whole or not at all, and a new one cuts off every device at once', () => {
+  const hub = createRemote();
+  const key = hub.key();
+  if (!/^[A-Za-z0-9_-]{32}$/.test(key)) throw new Error(`the key is ${key}`);
+  if (createRemote().key() === key) throw new Error('two runs made the same key');
+  eq(hub.allows(key), true, 'the key is taken');
+  for (const [bad, what] of [[key.slice(0, -1), 'one short'], [key + 'x', 'one long'],
+                             [key.slice(0, -1) + (key.endsWith('A') ? 'B' : 'A'), 'one letter out'],
+                             ['', 'empty'], [undefined, 'none'], [null, 'null']]) {
+    eq(hub.allows(bad), false, what);
+  }
+  /* Compared as digests of equal length, in constant time. */
+  if (!/timingSafeEqual\(digest\(given\), digest\(key\)\)/.test(fs.readFileSync(path.join(ROOT, 'lib/remote.js'), 'utf8'))) {
+    throw new Error('the key is not compared in constant time');
+  }
+  let cut = 0;
+  hub.onDevice(() => {}, () => { cut++; });
+  hub.onDevice(() => {}, () => { cut++; });
+  const fresh = hub.rotate();
+  eq(cut, 2, 'a new link ends every device stream');
+  eq(hub.devices(), 0, 'and forgets them');
+  eq(hub.allows(key), false, 'the old key is refused');
+  eq(hub.allows(fresh), true, 'the new one taken');
+});
+
+check('a device drives the deck window that holds the room and no other, and follows where that window is', () => {
+  let t = 0;
+  const hub = createRemote({ now: () => t });
+  const got = { a: [], b: [], dev: [], other: [] };
+  const offA = hub.onWindow('win-a', (e) => got.a.push(e));
+  const offB = hub.onWindow('win-b', (e) => got.b.push(e));
+  hub.onDevice((e) => got.dev.push(e), () => {});
+  hub.onDevice((e) => got.other.push(e), () => {});
+  const sent = (k) => got[k].filter((e) => e.type === 'message').map((e) => e.msg.type + (e.msg.dir ? ':' + e.msg.dir : ''));
+  const last = (k) => got[k].filter((e) => e.type === 'message' && e.msg.type === 'state').pop().msg;
+  eq(hub.holder(), 'win-a', 'the first window to connect holds the room');
+  hub.fromWindow({ type: 'state', window: 'win-a', channel: 'c', g: 1, s: 0, y: 0 });
+  hub.fromWindow({ type: 'state', window: 'win-b', channel: 'c', g: 3, s: 0, y: 0 });
+  eq(`${last('dev').tab} ${last('dev').g}`, 'win-a 1', 'a device hears where the holder is, and not the other');
+  eq(last('other').g, 1, 'as does every device');
+  eq(hub.fromDevice({ type: 'next' }).status, 200, 'a device says next');
+  hub.fromDevice({ type: 'go', dir: 'right' });
+  eq(sent('a').join(' '), 'next go:right', 'and the holder is told, as its notes would tell it');
+  eq(sent('b').length, 0, 'the other window is told nothing');
+  for (const type of ['attach', 'close', 'detach', 'jump', 'panel', 'dance']) {
+    eq(hub.fromDevice({ type }).status, 400, `a device cannot send ${type}`);
+  }
+  eq(hub.fromDevice({ type: 'go', dir: 'sideways' }).status, 400, 'nor a direction there is not');
+  eq(hub.fromWindow({ type: 'claim', window: 'win-z' }).status, 409, 'a window not connected cannot claim');
+  hub.fromWindow({ type: 'claim', window: 'win-b' });
+  eq(hub.holder(), 'win-b', 'a claim moves the room');
+  eq(last('dev').g, 3, 'and the device is shown where the new holder is at once');
+  hub.fromDevice({ type: 'back' });
+  eq(sent('b').join(' '), 'back', 'which is the one moved now');
+  eq(sent('a').length, 2, 'and the first is not');
+  /* The clock: a device's reaches the other devices and the holder's
+     notes, through its deck; a window that does not hold the room is
+     not heard. */
+  hub.fromDevice({ type: 'clock', elapsed: 5000, running: true, paused: false });
+  eq(sent('b').pop(), 'clock', "a device's clock reaches the holder");
+  eq(sent('other').pop(), 'clock', 'and the other devices');
+  t += 2000;
+  hub.fromWindow({ type: 'clock', window: 'win-a', elapsed: 0, running: false });
+  const clocks = got.other.filter((e) => e.type === 'message' && e.msg.type === 'clock');
+  eq(clocks.length, 1, "a window that does not hold the room does not set the clock");
+  offB();
+  eq(hub.live(), false, 'the holder gone, nothing holds the room');
+  eq(got.dev.filter((e) => e.type === 'live').pop().live, false, 'and the devices are told');
+  eq(hub.fromDevice({ type: 'next' }).status, 409, 'a command then moves nothing');
+  eq(sent('a').length, 2, 'and in particular not the window left behind');
+  /* A new device is told the clock as it reads now. */
+  const late = [];
+  hub.onDevice((e) => late.push(e), () => {});
+  eq(late.find((e) => e.msg && e.msg.type === 'clock').msg.elapsed, 7000, 'a device joining late is told the clock as it reads now');
+  t += 5000;
+  let refused = 0;
+  for (let i = 0; i < 25; i++) if (hub.fromDevice({ type: 'hello' }).status === 429) refused++;
+  eq(refused, 5, 'twenty requests in two seconds, from all devices together, and then a pause');
+  offA();
+});
+
+check('with a room open, a device follows the window the room follows, and the room alone decides which', () => {
+  let hub = null;
+  const relay = createRelay({ throttle: 0, tick: 0, grace: 0, held: () => { if (hub) hub.changed(); } });
+  hub = createRemote({ holding: () => relay.holding() });
+  const got = { a: [], b: [], dev: [] };
+  hub.onWindow('win-a', (e) => got.a.push(e));
+  hub.onWindow('win-b', (e) => got.b.push(e));
+  hub.onDevice((e) => got.dev.push(e), () => {});
+  relay.onTally(() => {}, { deck: 'win-b' });
+  relay.onTally(() => {}, { deck: 'win-a' });
+  eq(hub.holder(), 'win-b', 'the window the room took first, not the first to reach the notes');
+  hub.fromWindow({ type: 'state', window: 'win-a', g: 1, s: 0, y: 0 });
+  eq(hub.fromWindow({ type: 'claim', window: 'win-a' }).body.ignored, 'the room decides', 'a claim made to the notes alone is not taken');
+  hub.fromDevice({ type: 'next' });
+  eq(`${got.a.length} ${got.b.filter((e) => e.msg && e.msg.type === 'next').length}`, '0 1', 'the room\'s holder is moved');
+  relay.fromDeck({ type: 'claim', window: 'win-a', id: '1-x', step: 0 });
+  eq(hub.holder(), 'win-a', 'a claim to the room moves the device with it');
+  eq(got.dev.filter((e) => e.msg && e.msg.type === 'state').pop().msg.tab, 'win-a', 'which is shown where that window is at once');
+  hub.fromDevice({ type: 'next' });
+  eq(got.a.filter((e) => e.msg && e.msg.type === 'next').length, 1, 'and moves it');
+  relay.close();
+});
+
+check('in the browser, the device moves the deck that holds the room, by key or by touch, and follows it wherever it is moved from', () => {
+  const hub = createRemote();
+  const bus = makeBus();
+  const one = hubWindow(REMOTE_DECK, [js, remoteJs], hub, { bus });
+  const two = hubWindow(REMOTE_DECK, [js, remoteJs], hub, { bus, url: 'http://localhost:9999/#2-labels' });
+  const idOf = (w) => w.win.document.getElementById('deck').getAttribute('data-window');
+  const at = (w) => w.win.document.querySelector('.slide.current').id;
+  const scriptOf = (w) => w.win.document.querySelector('.slide.current .notes').textContent.trim();
+  const device = hubWindow(DEVICE_PAGE, [remoteJs, presenterJs], hub, {
+    url: 'http://192.168.1.7:5555/presenter?key=k',
+    before: (w, timers) => { w.setTimeout = (fn, ms) => { timers.push({ fn, ms }); return timers.length; }; },
+  });
+  const doc = device.win.document;
+  const script = () => doc.getElementById('notes').textContent.trim();
+  const press = (command) => doc.querySelector(`#remote-controls [data-command="${command}"]`).click();
+
+  eq(hub.holder(), idOf(one), 'the first deck window holds the room');
+  eq(doc.body.classList.contains('live'), true, 'the device says it is following a deck');
+  eq(script(), scriptOf(one), 'and shows the script of where that window is');
+  device.key('PageDown');
+  eq(at(one), '2-middle', 'PageDown on the device moves the deck that holds the room');
+  eq(at(two), '2-labels', 'and not the other');
+  eq(script(), scriptOf(one), 'and the device follows it there');
+  one.key('ArrowDown');
+  eq(at(one), '2-one-line-then-two', 'a move made on the laptop');
+  eq(script(), scriptOf(one), 'reaches the device too');
+  press('next');
+  eq(at(one), '2-one-line-then-two-2', 'the Next button steps a build');
+  press('back');
+  press('left');
+  eq(at(one), '1-three-movements', 'and the movement buttons move by movement');
+  press('right');
+  eq(at(one), '2-one-line-then-two', 'back to where that movement was left');
+  eq(script(), scriptOf(one), 'the device following every one of them');
+  two.key('ArrowUp');
+  eq(script(), scriptOf(one), "the other window's moves do not reach the device");
+
+  /* One clock between the device and the notes on the laptop. */
+  const notes = hubWindow(NOTES_PAGE, [presenterJs, qrJs, remoteJs], hub,
+    { bus, url: `http://localhost:9999/presenter?tab=${idOf(one)}` });
+  const running = (w) => w.win.document.getElementById('clock').classList.contains('running');
+  device.key('t');
+  eq(running(notes), true, "the device's T starts the clock in the laptop's notes");
+  notes.key('t');
+  eq(running(device), false, "and the laptop's T pauses the device's");
+  device.key('t');
+  device.key('t');
+  eq(notes.win.document.getElementById('clock').textContent, '00:00', 'a reset on the device resets the laptop');
+  eq(at(one), '1-three-movements', 'and takes the deck back to the start, as the notes do');
+
+  /* The keys that move the notes around have nowhere to go. */
+  device.key('n');
+  device.key('d');
+  const asked = device.posted.map((p) => p.msg && p.msg.type);
+  for (const t of ['close', 'attach', 'detach']) if (asked.includes(t)) throw new Error(`the device sent ${t}`);
+  if (doc.getElementById('attach-btn') || doc.getElementById('close-btn') || doc.getElementById('remote-btn')) {
+    throw new Error('the device page carries a control for the notes on the laptop');
+  }
+
+  two.key('h');
+  eq(hub.holder(), idOf(two), 'H in another deck window takes the device with it');
+  eq(script(), scriptOf(two), 'which is shown where that window is at once');
+  device.key('PageUp');
+  eq(`${at(one)} ${at(two)}`, '1-three-movements 2-rows', 'and it is that window the device moves now');
+
+  /* The deck goes: the device says so, a moment later, and keeps the
+     last slide it showed. */
+  const kept = script();
+  two.streams.filter((es) => es.url.startsWith('/remote/window')).forEach((es) => es.close());
+  device.timers.filter((x) => x.ms === 3000).forEach((x) => x.fn());
+  const status = doc.getElementById('remote-status').textContent;
+  if (!/has gone/.test(status)) throw new Error(`the device says: "${status}"`);
+  eq(script(), kept, 'and keeps the last slide');
+
+  /* A new link: the stream is ended, the browser's retry refused. */
+  const es = device.streams.find((s) => s.url.startsWith('/remote/stream'));
+  hub.rotate();
+  eq(doc.body.classList.contains('cut'), true, 'a device whose link was replaced is told, and says it is cut off');
+  eq(es.readyState, 2, 'its stream ended');
+  if (!/no longer works/.test(doc.getElementById('remote-status').textContent)) throw new Error('and does not say why');
+});
+
+check('the link is shown in the notes on this machine alone, asked for when opened, and on no page anyone else is sent', () => {
+  const { deckPage, presenterPage, printPage, phonePage, slidePage } = pagesLib;
+  const room = render(fs.readFileSync(TALK.deck, 'utf8'), TALK);
+  const here = presenterPage(room, 9999, '1', 'notes');
+  if (!here.includes('id="remote-btn"')) throw new Error("the laptop's notes have no control for another device");
+  const elsewhere = [['the device', presenterPage(room, 9999, '1', 'device')], ['a notes page with no remote', presenterPage(room, 9999, '1')],
+    ['the deck', deckPage(room, { remote: true })], ['a deck sent elsewhere', deckPage(room, { notes: false, remote: true })],
+    ['paper', printPage(room)], ['a phone', phonePage('Minimal')], ['a slide on a phone', slidePage(room, '1-a-slide-of-every-template', 0)]];
+  for (const [what, page] of elsewhere) if (/remote-btn|remote-panel|\/remote\/link/.test(page)) throw new Error(`${what} carries the link's control`);
+  if (/data-remote|remote\.js/.test(deckPage(room, { notes: false, remote: true }))) throw new Error('a deck sent elsewhere can reach for the notes');
+  if (!/data-remote="window"[\s\S]*\/js\/remote\.js/.test(deckPage(room, { remote: true }))) throw new Error('the deck on this machine does not speak to the server');
+
+  /* Answered at once, so the page's chain of thens runs inside the check. */
+  const sync = (v) => ({ then: (f) => { const out = f ? f(v) : v; return out && typeof out.then === 'function' ? out : sync(out); },
+                         catch() { return this; } });
+  let link = 'http://192.168.1.7:5555/presenter?key=first-key-0000000000000000000000';
+  const asked = [];
+  const notes = hubWindow(NOTES_PAGE, [presenterJs, qrJs, remoteJs], createRemote(), {
+    fetch: (u, init) => {
+      asked.push(`${(init && init.method) || 'GET'} ${u}`);
+      if (u === '/remote/rotate') link = link.replace('first', 'fresh');
+      return sync({ ok: true, status: 200, json: () => sync({ url: link }) });
+    },
+  });
+  const d = notes.win.document;
+  eq(d.getElementById('remote-panel').hidden, true, 'the link is not showing until asked for');
+  eq(asked.length, 0, 'nor asked for');
+  d.getElementById('remote-btn').click();
+  eq(d.getElementById('remote-panel').hidden, false, 'opened, it shows');
+  eq(asked.join(' '), 'GET /remote/link', 'and asks the server for the link');
+  eq(d.getElementById('remote-url').textContent, link, 'the link, as text');
+  const read = rasterSvg(d.getElementById('remote-qr').innerHTML);
+  eq(read && read.data, link, 'and as a QR code that reads back as the link');
+  const again = d.getElementById('remote-rotate');
+  again.click();
+  eq(asked.length, 1, 'a new link is asked for twice before it is made');
+  again.click();
+  eq(asked.pop(), 'POST /remote/rotate', 'and then made');
+  eq(d.getElementById('remote-url').textContent, link, 'and shown in place of the old');
+  if (!/fresh/.test(link)) throw new Error('the check did not rotate');
+  d.getElementById('remote-btn').click();
+  eq(d.getElementById('remote-panel').hidden, true, 'closed again, it goes');
+});
+
+/* The same over the network, in both arrangements: a talk with no room,
+   whose deck listens on every interface, and a talk with one, whose deck
+   listens on this machine alone. Asked from this machine's own network
+   address, as another device would ask. */
+{
+  const lan = (() => {
+    for (const list of Object.values(require('os').networkInterfaces())) {
+      for (const n of list || []) if (n.family === 'IPv4' && !n.internal) return n.address;
+    }
+    return null;
+  })();
+
+  /* What every probe below shares: a served talk, and a way to ask it for
+     a page, a POST, and the events of a stream as they arrive. */
+  const helpers = (dir) => `
+    const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+    const http = require('http');
+    const LAN = ${JSON.stringify(lan)};
+    const s = serve(${JSON.stringify(dir)}, { port: 0, log: { log(){}, warn(){}, error(){} } });
+    const up = (srv) => new Promise((ok) => (srv.listening ? ok() : srv.once('listening', ok)));
+    const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+    const get = (host, port, p, headers = {}) => new Promise((ok) => http.get({ host, port, path: p, headers }, (r) => {
+      let body = ''; r.on('data', (c) => { body += c; });
+      r.on('end', () => ok({ status: r.statusCode, body, cookie: (r.headers['set-cookie'] || [''])[0] }));
+    }).on('error', (e) => ok({ status: 0, body: e.message, cookie: '' })));
+    const req = (host, port, p, body, headers = {}) => new Promise((ok) => {
+      const q = http.request({ host, port, path: p, method: 'POST',
+        headers: { 'content-type': 'application/json', ...headers } }, (r) => {
+        let b = ''; r.on('data', (c) => { b += c; }); r.on('end', () => ok({ status: r.statusCode, body: b }));
+      });
+      q.on('error', (e) => ok({ status: 0, body: e.message }));
+      q.end(JSON.stringify(body));
+    });
+    /* A stream's events as they arrive, and whether the server ended it. */
+    const events = (host, port, p) => {
+      const got = []; let ended = false; let status = 0;
+      const q = http.get({ host, port, path: p }, (r) => {
+        status = r.statusCode; r.setEncoding('utf8'); let buf = '';
+        r.on('data', (c) => {
+          buf += c;
+          for (let i = buf.indexOf('\\n\\n'); i > -1; i = buf.indexOf('\\n\\n')) {
+            const m = /^data: (.*)$/m.exec(buf.slice(0, i)); buf = buf.slice(i + 2);
+            if (m) got.push(JSON.parse(m[1]));
+          }
+        });
+        r.on('end', () => { ended = true; });
+      });
+      q.on('error', () => { ended = true; });
+      return { got, ended: () => ended, status: () => status, close: () => q.destroy(),
+               sent: () => got.filter((e) => e.type === 'message').map((e) => e.msg.type) };
+    };
+  `;
+
+  const noRoom = 'over the network, with no room, the notes on another device need the link: ' +
+    'without it or with one letter wrong nothing answers, with it the script does, and a new link cuts the old one off';
+  const inRoomName = 'over the network, with the room open, the link reaches the notes and nothing an attendee ' +
+    'can fetch carries it, and the device drives the window the room follows';
+
+  if (!lan) {
+    for (const name of [noRoom, inRoomName]) console.log(`  --    ${name}\n        not run: this machine has no network address to ask from`);
+  } else {
+    check(noRoom, () => {
+      const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-remote-'));
+      fs.cpSync(TALK.dir, dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'deck.md'), MOVES_SRC);
+      const probe = helpers(dir) + `
+        (async () => {
+          await up(s); await up(s.remote.server);
+          const D = s.address().port, R = s.remote.port, key = s.remote.hub.key();
+          const wrong = key.slice(0, -1) + (key.endsWith('A') ? 'B' : 'A');
+          const script = (b) => /The first movement holds one slide/.test(b);
+          const out = { hostD: s.address().address, hostR: s.remote.server.address().address };
+          out.none = await get(LAN, R, '/presenter');
+          out.wrong = await get(LAN, R, '/presenter?key=' + wrong);
+          const page = await get(LAN, R, '/presenter?key=' + key);
+          out.page = { status: page.status, script: script(page.body), key: page.body.includes(key), cookie: page.cookie };
+          const jar = page.cookie.split(';')[0];
+          out.sheet = { none: (await get(LAN, R, '/css/presenter.css')).status,
+                        wrongCookie: (await get(LAN, R, '/css/presenter.css', { cookie: jar.replace(key, wrong) })).status,
+                        cookie: (await get(LAN, R, '/css/presenter.css', { cookie: jar })).status,
+                        image: (await get(LAN, R, '/images/one-piece.svg', { cookie: jar })).status };
+          out.noKeyAnywhere = {};
+          for (const p of ['/', '/js/presenter.js', '/deck.css', '/reload', '/remote/stream', '/images/one-piece.svg']) {
+            out.noKeyAnywhere[p] = (await get(LAN, R, p)).status;
+          }
+          out.noKeyPost = (await req(LAN, R, '/remote/command', { type: 'next' })).status;
+          out.withKeyNotHere = {};
+          for (const p of ['/', '/print', '/remote/link', '/remote/window?window=x']) {
+            out.withKeyNotHere[p] = (await get(LAN, R, p + (p.includes('?') ? '&' : '?') + 'key=' + key)).status;
+          }
+          /* The deck's listener, from the network: the deck, without its
+             notes, as ever; nothing of the link, and the key opens nothing. */
+          out.deck = {};
+          for (const p of ['/remote/link', '/presenter?key=' + key, '/remote/window?window=x']) out.deck[p] = (await get(LAN, D, p)).status;
+          out.deckRotate = (await req(LAN, D, '/remote/rotate', {})).status;
+          out.deckWindowPost = (await req(LAN, D, '/remote/window', { type: 'state', window: 'x', g: 0, s: 0, y: 0 })).status;
+          out.rebound = (await get('127.0.0.1', D, '/remote/link', { host: 'rebound.example:' + D })).status;
+          const link = await get('127.0.0.1', D, '/remote/link');
+          out.link = JSON.parse(link.body).url;
+          out.keyIn = [];
+          for (const [host, p] of [[LAN, '/'], ['127.0.0.1', '/'], ['127.0.0.1', '/presenter'], ['127.0.0.1', '/presenter?tab=x']]) {
+            if ((await get(host, D, p)).body.includes(key)) out.keyIn.push(host + p);
+          }
+
+          /* Two deck windows on this machine, and a device. */
+          const a = events('127.0.0.1', D, '/remote/window?window=win-a');
+          await wait(80);
+          const b = events('127.0.0.1', D, '/remote/window?window=win-b');
+          const dev = events(LAN, R, '/remote/stream?key=' + key);
+          await wait(120);
+          await req('127.0.0.1', D, '/remote/window', { type: 'state', window: 'win-a', channel: 'c', g: 1, s: 0, y: 0 });
+          await req('127.0.0.1', D, '/remote/window', { type: 'state', window: 'win-b', channel: 'c', g: 2, s: 1, y: 0 });
+          await wait(80);
+          out.followed = dev.got.filter((e) => e.type === 'message').map((e) => e.msg.tab + ':' + e.msg.g);
+          out.next = (await req(LAN, R, '/remote/command?key=' + key, { type: 'next' })).status;
+          out.plain = (await req(LAN, R, '/remote/command?key=' + key, { type: 'next' }, { 'content-type': 'text/plain' })).status;
+          await wait(80);
+          out.first = { a: a.sent(), b: b.sent() };
+          out.claim = (await req('127.0.0.1', D, '/remote/window', { type: 'claim', window: 'win-b' })).status;
+          await req(LAN, R, '/remote/command?key=' + key, { type: 'go', dir: 'right' });
+          await wait(80);
+          out.second = { a: a.sent(), b: b.sent() };
+          out.followedAfter = dev.got.filter((e) => e.type === 'message').pop().msg.tab;
+
+          /* A new link. */
+          out.rotatePlain = (await req('127.0.0.1', D, '/remote/rotate', {}, { 'content-type': 'text/plain' })).status;
+          out.stillOpen = !dev.ended();
+          const rotated = await req('127.0.0.1', D, '/remote/rotate', {});
+          const fresh = JSON.parse(rotated.body).url.split('key=')[1];
+          await wait(120);
+          out.cut = dev.ended();
+          out.fresh = fresh !== key && fresh.length === key.length;
+          out.old = { page: (await get(LAN, R, '/presenter?key=' + key)).status,
+                      cookie: (await get(LAN, R, '/css/presenter.css', { cookie: jar })).status,
+                      stream: (await get(LAN, R, '/remote/stream?key=' + key)).status,
+                      command: (await req(LAN, R, '/remote/command?key=' + key, { type: 'next' })).status };
+          out.fresh = { same: !out.fresh, page: (await get(LAN, R, '/presenter?key=' + fresh)).status };
+          out.keyWas = key;
+          a.close(); b.close();
+          console.log(JSON.stringify(out));
+          s.close(); process.exit(0);
+        })();
+      `;
+      const run = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 25000 });
+      fs.rmSync(dir, { recursive: true, force: true });
+      eq(run.status, 0, `the probe ran (${run.stderr.trim().split('\n')[0]})`);
+      const out = JSON.parse(run.stdout.trim().split('\n').pop());
+      eq(out.hostR, '0.0.0.0', 'the notes have a listener of their own on the network');
+      eq(`${out.none.status} ${out.none.body}`, '404 not found', 'without the link, /presenter does not exist');
+      eq(`${out.wrong.status} ${out.wrong.body}`, '404 not found', 'nor with one letter of it wrong');
+      eq(out.page.status, 200, 'with the link it does');
+      eq(out.page.script, true, 'and carries the script');
+      eq(out.page.key, false, 'though not the key, which only the address holds');
+      if (!/^sipario-remote-\d+=[A-Za-z0-9_-]{32}; Path=\/; HttpOnly; SameSite=Strict$/.test(out.page.cookie)) {
+        throw new Error(`the page's cookie is ${out.page.cookie}`);
+      }
+      eq(`${out.sheet.none} ${out.sheet.wrongCookie} ${out.sheet.cookie} ${out.sheet.image}`, '404 404 200 200',
+         "the page's sheets and images need the key too, which its cookie carries");
+      for (const [p, code] of Object.entries(out.noKeyAnywhere)) eq(code, 404, `without the key, ${p}`);
+      eq(out.noKeyPost, 404, 'and a command');
+      for (const [p, code] of Object.entries(out.withKeyNotHere)) eq(code, 404, `even with the key, ${p} is not on this listener`);
+      for (const [p, code] of Object.entries(out.deck)) eq(code, 404, `from the network, the deck's listener answers ${p} with nothing`);
+      eq(out.deckRotate, 404, 'and no one on the network can make a new link');
+      eq(out.deckWindowPost, 404, 'nor speak for a deck window');
+      eq(out.rebound, 404, 'nor a page that reached this machine by another name');
+      if (!out.link.startsWith(`http://`) || !out.link.endsWith(`/presenter?key=${out.keyWas}`)) throw new Error(`the link is ${out.link}`);
+      eq(out.keyIn.join(' '), '', "the key is in no page the server sends, the laptop's included");
+      eq(out.followed.join(' '), 'win-a:1', 'the device follows the window that holds the room, and not the other');
+      eq(out.next, 200, 'a command with the key is taken');
+      eq(out.plain, 415, 'and one that does not say it is JSON is not');
+      eq(`${out.first.a.join(',')} | ${out.first.b.join(',')}`, 'next | ', 'next moves the holder and not the other window');
+      eq(out.claim, 200, 'a claim moves the room');
+      eq(`${out.second.a.join(',')} | ${out.second.b.join(',')}`, 'next | go', 'and the next command moves the new holder');
+      eq(out.followedAfter, 'win-b', 'which the device now follows');
+      eq(out.rotatePlain, 415, 'a new link is made only by a request that says it is JSON');
+      eq(out.stillOpen, true, 'so the device is still connected');
+      eq(out.cut, true, 'a new link ends the device\'s stream at once');
+      eq(`${out.old.page} ${out.old.cookie} ${out.old.stream} ${out.old.command}`, '404 404 404 404', 'and the old key, and its cookie, open nothing');
+      eq(`${out.fresh.same} ${out.fresh.page}`, 'false 200', 'the new one does');
+    });
+
+    check(inRoomName, () => {
+      const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-remote-room-'));
+      fs.cpSync(TALK.dir, dir, { recursive: true });
+      const probe = helpers(dir) + `
+        (async () => {
+          await up(s); await up(s.room.server); await up(s.remote.server);
+          const D = s.address().port, P = s.room.port, R = s.remote.port, key = s.remote.hub.key();
+          const out = { hostD: s.address().address };
+          const page = await get(LAN, R, '/presenter?key=' + key);
+          out.page = { status: page.status, script: /This deck exists twice over/.test(page.body) };
+          out.none = (await get(LAN, R, '/presenter')).status;
+          /* The room's counts, asked for through the notes' listener as a
+             deck window would ask: it must not take the room. */
+          const counts = events(LAN, R, '/audience/stream?deck=win-z&key=' + key);
+          await wait(100);
+          out.counts = counts.got.length && counts.got[0].type;
+          out.heldAfterCounts = s.room.relay.holding();
+          const roomB = events('127.0.0.1', D, '/audience/stream?deck=win-b');
+          await wait(80);
+          const roomA = events('127.0.0.1', D, '/audience/stream?deck=win-a');
+          const a = events('127.0.0.1', D, '/remote/window?window=win-a');
+          const b = events('127.0.0.1', D, '/remote/window?window=win-b');
+          const dev = events(LAN, R, '/remote/stream?key=' + key);
+          await wait(120);
+          out.holder = s.remote.hub.holder();
+          out.claimHere = JSON.parse((await req('127.0.0.1', D, '/remote/window', { type: 'claim', window: 'win-a' })).body).ignored;
+          await req(LAN, R, '/remote/command?key=' + key, { type: 'next' });
+          await wait(80);
+          out.first = { a: a.sent(), b: b.sent() };
+          await req('127.0.0.1', D, '/audience/deck', { type: 'claim', window: 'win-a', id: '1-a-slide-of-every-template', step: 0 });
+          await req('127.0.0.1', D, '/remote/window', { type: 'state', window: 'win-a', channel: 'c', g: 0, s: 0, y: 0 });
+          await req(LAN, R, '/remote/command?key=' + key, { type: 'next' });
+          await wait(80);
+          out.second = { a: a.sent(), b: b.sent(), holder: s.remote.hub.holder(),
+                         followed: dev.got.filter((e) => e.type === 'message').pop().msg.tab };
+
+          /* Nothing an attendee can fetch carries the key: the phones'
+             listener, a slide on it, the deck and its streams. */
+          const seen = [];
+          const look = async (host, port, p) => { const r = await get(host, port, p); if (r.body.includes(key) || r.cookie.includes(key)) seen.push(port + p); return r.status; };
+          out.statuses = [await look(LAN, P, '/'), await look(LAN, P, '/phone.js'), await look(LAN, P, '/slide/1-a-slide-of-every-template/0'),
+                          await look('127.0.0.1', D, '/'), await look('127.0.0.1', D, '/presenter'), await look(LAN, P, '/presenter')];
+          const stage = events(LAN, P, '/stream');
+          const tally = events('127.0.0.1', D, '/audience/stream');
+          await wait(120);
+          if (JSON.stringify(stage.got).includes(key)) seen.push('phone stream');
+          if (JSON.stringify(tally.got).includes(key)) seen.push('tally stream');
+          out.seen = seen;
+          for (const x of [counts, roomA, roomB, a, b, dev, stage, tally]) x.close();
+          console.log(JSON.stringify(out));
+          s.room.relay.close(); s.close(); process.exit(0);
+        })();
+      `;
+      const run = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 25000 });
+      fs.rmSync(dir, { recursive: true, force: true });
+      eq(run.status, 0, `the probe ran (${run.stderr.trim().split('\n')[0]})`);
+      const out = JSON.parse(run.stdout.trim().split('\n').pop());
+      eq(out.hostD, '127.0.0.1', 'with the room open the deck is still this machine\'s alone');
+      eq(out.page.status, 200, 'and the link reaches the notes from the network all the same');
+      eq(out.page.script, true, 'script and all');
+      eq(out.none, 404, 'and nothing without it');
+      eq(out.counts, 'tally', "the notes' header hears the room's counts through the link");
+      eq(out.heldAfterCounts, null, 'as a listener that can never hold the room, whatever it says it is');
+      eq(out.holder, 'win-b', 'the device follows the window the room follows');
+      eq(out.claimHere, 'the room decides', 'and a claim made to the notes alone moves nothing');
+      eq(`${out.first.a.join(',')} | ${out.first.b.join(',')}`, ' | next', 'a command moves the window the room follows');
+      eq(out.second.holder, 'win-a', 'H or full screen in another window takes the room');
+      eq(`${out.second.a.join(',')} | ${out.second.b.join(',')}`, 'next | next', 'and the device with it');
+      eq(out.second.followed, 'win-a', 'which the device now follows');
+      eq(out.statuses.join(' '), '200 200 200 200 200 404', 'the pages asked for answer as they always have');
+      eq(out.seen.join(' '), '', 'and not one of them carries the key');
+    });
+  }
+}
+
 check('a server asked for no room opens none, whatever the deck says', () => {
   /* The export serves a talk this way. A photograph of the deck has no
      business listening on the network. */

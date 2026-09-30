@@ -16,7 +16,19 @@
   /* The same name the deck window reads, off the same attribute, so the
      two ends of the channel cannot be named apart. */
   var CHANNEL = document.getElementById("deck").getAttribute("data-deck") || "";
-  var bus = window.BroadcastChannel ? new BroadcastChannel(CHANNEL) : null;
+
+  /* On another device the deck is not in this browser, and the channel to
+     it is carried by the server instead (js/remote.js, loaded first, says
+     so here). The messages are the same either way. */
+  function channel(name) {
+    if (window.__remoteChannel) return window.__remoteChannel(name);
+    return window.BroadcastChannel ? new BroadcastChannel(name) : null;
+  }
+  var bus = channel(CHANNEL);
+
+  /* Opened on another device: nothing is beside this page to dock into,
+     so the keys that move the notes do nothing here. */
+  var DEVICE = document.getElementById("deck").getAttribute("data-remote") === "device";
 
   /* Which deck window this panel belongs to, handed over in the URL by the
      window that opened it. The channel is named for the talk, so two
@@ -131,7 +143,7 @@
     if (!key || key === CHANNEL || key === probeKey) return;
     if (probe) probe.close();
     probeKey = key;
-    probe = window.BroadcastChannel ? new BroadcastChannel(key) : null;
+    probe = channel(key);
     if (probe) { listen(probe, true); hello(probe); }
   }
   function promote() {
@@ -147,7 +159,7 @@
     if (key === probeKey) { promote(); return; }
     if (bus) bus.close();
     CHANNEL = key;
-    bus = window.BroadcastChannel ? new BroadcastChannel(CHANNEL) : null;
+    bus = channel(CHANNEL);
     listen(bus, false);
   }
 
@@ -335,6 +347,11 @@
          page nobody is looking at. */
       if (!document || !document.body) { ch.close(); return; }
       var m = ev.data || {};
+      /* The clock, from the notes wherever else they are open. */
+      if (m.from === "presenter" && m.type === "clock") {
+        if (!probing && (!OWNER || !m.tab || m.tab === OWNER)) adoptClock(m);
+        return;
+      }
       if (m.from !== "deck") return;
       /* Another window of the same talk. Not ours to follow. */
       if (OWNER && m.tab && m.tab !== OWNER) return;
@@ -423,6 +440,7 @@
     elClock.classList.remove("running");
     tickTock();
     send({ type: "reset" });
+    sendClock();
     say("Reset. Back at the first slide.");
     setTimeout(function () { if (!asking) say(""); }, 1800);
   }
@@ -446,6 +464,31 @@
       tick = setInterval(tickTock, 500);
       elClock.classList.add("running");
     }
+    tickTock();
+    sendClock();
+  }
+
+  /* ---- one clock, wherever the notes are open
+   *
+   * The notes on this machine and on another device keep one clock
+   * between them: each start, pause and reset is said, as the time read
+   * and whether it runs, and the others take it as theirs. Said as the
+   * time read rather than as a moment, because two devices do not agree
+   * on what time it is. The question before a reset stays with whoever
+   * asked it. */
+  function sendClock() {
+    send({ type: "clock", elapsed: held + (t0 ? Date.now() - t0 : 0), running: !!t0, paused: paused });
+  }
+
+  function adoptClock(m) {
+    if (typeof m.elapsed !== "number" || typeof m.running !== "boolean") return;
+    clearInterval(tick);
+    held = m.elapsed;
+    t0 = m.running ? Date.now() : null;
+    paused = !m.running && !!m.paused;
+    if (t0) tick = setInterval(tickTock, 500);
+    elClock.classList.toggle("running", !!t0);
+    if (asking) { asking = false; say(""); }
     tickTock();
   }
 
@@ -471,7 +514,8 @@
     }, 250);
   }
 
-  document.getElementById("attach-btn").addEventListener("click", attach);
+  var attachBtn = document.getElementById("attach-btn");
+  if (attachBtn) attachBtn.addEventListener("click", attach);
 
   /* Close hides the notes, as N does in the deck. The deck opened this
      window, so the deck closes it; one it did not open says so instead. */
@@ -485,7 +529,8 @@
     }, 250);
   }
 
-  document.getElementById("close-btn").addEventListener("click", closeNotes);
+  var closeBtn = document.getElementById("close-btn");
+  if (closeBtn) closeBtn.addEventListener("click", closeNotes);
 
   /* D is the deck's key for moving the notes, and it has to work with the
      notes in focus too, which is where the hands are once the script has
@@ -653,8 +698,8 @@
     else if (k === "ArrowUp") send({ type: "go", dir: "up" });
     else if (k === "t" || k === "T") timer();
     else if (k === "m" || k === "M") send({ type: "map" });
-    else if (k === "n" || k === "N") closeNotes();
-    else if (k === "d" || k === "D") moveNotes();
+    else if ((k === "n" || k === "N") && !DEVICE) closeNotes();
+    else if ((k === "d" || k === "D") && !DEVICE) moveNotes();
     else if (panelKey(k)) { /* handled */ }
     else return;
     ev.preventDefault();
