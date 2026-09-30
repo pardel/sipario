@@ -21,3 +21,34 @@
 }
 
 .title-author { margin-top: 4px; }
+
+/* Where the room joins: a QR code at the right of the stage, 280px on a
+   1280px slide, which on a three-metre screen is some 65cm across and
+   reads from the back of a hall, with the address under it in the mono
+   face for anyone typing it. The deck fills both; until it has, and on
+   paper, the pair holds its place and shows nothing. */
+
+.title-join {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 280px;
+  margin: 0;
+  text-align: center;
+}
+
+.title-qr { width: 280px; height: 280px; color: var(--ink); background: var(--ground); }
+
+/* The words keep out of its way once it is drawn, and only then: a deck
+   with no room, and the deck on paper, set the title as they always
+   have. On its own ground, because a code read through the slide's glow
+   is a code read badly. */
+
+.slide.template-title .stage:has(.title-qr:not(:empty)) { padding-right: 320px; }
+
+.title-qr svg { display: block; width: 100%; height: 100%; }
+
+.title-address { margin-top: 6px; font-family: var(--mono); font-size: 16px; color: var(--ink-soft); }
+
+.title-join:has(.title-qr:empty) { visibility: hidden; }

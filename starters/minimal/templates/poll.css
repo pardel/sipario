@@ -1,0 +1,53 @@
+/* A poll: the question, then its options as rows, each with a teal bar
+   along its foot as long as its share of the answers, and the count at
+   its end. `--share` and `data-votes` are written by the deck as the
+   room answers; before that, and on paper, the bars are empty and the
+   counts absent. */
+
+.poll-question {
+  font-size: 28px;
+  line-height: 1.3;
+  color: var(--ink);
+  max-width: 36ch;
+  margin: 0 0 26px;
+}
+
+.poll-options { list-style: none; margin: 0; padding: 0; }
+
+.poll-option {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 24px;
+  padding: 12px 0 14px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 23px;
+  color: var(--ink-body);
+}
+
+.poll-option::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 4px;
+  width: calc(var(--share, 0) * 100%);
+  background: var(--accent);
+  transition: width 600ms ease-out;
+}
+
+.poll-option[data-votes]::after {
+  content: attr(data-votes);
+  font-family: var(--mono);
+  font-size: 20px;
+  color: var(--ink-faint);
+}
+
+.poll-text { max-width: 44ch; }
+
+.poll-join { margin-top: auto; font-size: 17px; color: var(--ink-faint); }
+
+.poll-address { font-family: var(--mono); font-weight: 700; color: var(--accent); }
+
+.poll-join:has(.poll-address:empty) { visibility: hidden; }

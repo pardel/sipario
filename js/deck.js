@@ -196,15 +196,15 @@
     "<dt>&darr; &uarr;</dt><dd>Next and previous step, then slide, within a part</dd>" +
     "<dt>Home / End</dt><dd>First and last slide</dd>" +
     "<dt>Shift &uarr;</dt><dd>Top of the current part</dd>" +
-    "<dt>P</dt><dd>Show or hide the notes beside the deck</dd>" +
+    "<dt>N</dt><dd>Show or hide the notes beside the deck</dd>" +
     "<dt>D</dt><dd>Move the notes to their own window, or bring them back</dd>" +
-    "<dt>A</dt><dd>In that window, put them back beside the deck</dd>" +
     "<dt>1 / 2</dt><dd>In the notes, hide or show the current or the next slide</dd>" +
     "<dt>+ / -</dt><dd>In the notes, a bigger or a smaller script</dd>" +
     "<dt>O</dt><dd>Overview of every slide; the arrows move the selection</dd>" +
     "<dt>Enter</dt><dd>In the overview, show the selected slide</dd>" +
     "<dt>M</dt><dd>A map of the talk in the corner, here and in the notes, marking where you are</dd>" +
-    "<dt>F</dt><dd>Full screen</dd>" +
+    "<dt>F</dt><dd>Full screen; docked notes move to their own window first</dd>" +
+    "<dt>H</dt><dd>Make this window the one the room's phones follow</dd>" +
     "<dt>C</dt><dd>Check every slide for content running off the stage</dd>" +
     "<dt>R</dt><dd>Back to the start, forgetting where each movement was left</dd>" +
     "<dt>?</dt><dd>This help</dd>" +
@@ -501,6 +501,10 @@
     }
     fit();
     publish();
+    /* Said for anything else on the page that follows the deck: the room,
+       where the talk has one, tells the phones from this. Nothing here
+       knows whether anything is listening. */
+    deck.dispatchEvent(new CustomEvent("slidechange"));
   }
 
 
@@ -642,6 +646,30 @@
        windows; it only costs a detached panel its pairing on reload. */
     TAB = Math.random().toString(36).slice(2, 10);
   }
+  /* The same id names this window to the room, where there is one, as
+     the window that may drive it (js/audience.js reads it here). */
+  deck.setAttribute("data-window", TAB);
+
+  /* A tab the browser duplicates takes a copy of sessionStorage, id and
+     all, and would pass for the window it was copied from: its notes, and
+     the room's phones, would follow either. So a window asks, as it
+     loads, whether a live window already has its id; one that does
+     answers, and the newcomer takes an id of its own. Which is the
+     newcomer is said by when each loaded, not by who answers first. A
+     reload never meets itself: the page it replaces is gone before it
+     asks. */
+  var born = Date.now();
+  /* A page on its way out, into a reload or the back-forward cache, is no
+     longer the window its id names, and does not answer for it. */
+  var leaving = false;
+  window.addEventListener("pagehide", function () { leaving = true; });
+  window.addEventListener("pageshow", function () { leaving = false; });
+  function renew() {
+    TAB = Math.random().toString(36).slice(2, 10);
+    try { sessionStorage.setItem("notes-tab", TAB); } catch (e) { /* this load only */ }
+    deck.setAttribute("data-window", TAB);
+    deck.dispatchEvent(new CustomEvent("windowchange"));
+  }
 
   /* Read from CSS rather than repeated here: `--dock` sizes the panel and
      this scales the deck to what is left, and two copies of one number
@@ -673,25 +701,43 @@
   function detached() { return !!(win && !win.closed); }
   window.__detached = detached;      // the suite asserts the two states never overlap
 
+  /* The dock's two controls are drawn, not written: a box with an arrow
+     leaving it for "its own window", and a cross for "close". Strokes in
+     the text's own colour, so the bar's inks and its hover reach them;
+     each keeps a name for a screen reader and a tooltip with its key. */
+  function icon(d) {
+    return '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+      '<path d="' + d + '"/></svg>';
+  }
+  var POP_OUT = "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5";
+  var CROSS = "M6 6l12 12M18 6L6 18";
+
   function makeDock() {
     if (dock) return;
     dock = document.createElement("aside");
     dock.id = "dock";
     dock.innerHTML =
-      '<div id="dock-bar">' +
-      '<span>Notes</span>' +
-      '<button type="button" id="dock-detach" title="Open in its own window (D)">detach</button>' +
-      '<button type="button" id="dock-close" title="Hide the notes (P)">close</button>' +
+      '<div id="dock-bar" class="notes-bar" role="toolbar" aria-label="Notes">' +
+      '<span class="bar-room" data-room-phones title="Phones connected"></span><span class="bar-room" data-room-reactions title="Reactions from the room"></span><span class="bar-room bar-pace" data-room-pace title="The pace the room asks for"></span>' +
+      '<span class="bar-room bar-alert" data-room-alert></span>' +
+      '<button type="button" id="dock-detach" aria-label="Detach notes" title="Detach notes: open them in their own window (D)">' +
+      icon(POP_OUT) + '</button>' +
+      '<button type="button" id="dock-close" aria-label="Close notes" title="Close notes: hide them (N)">' +
+      icon(CROSS) + '</button>' +
       '</div><iframe id="dock-frame" src="/presenter?tab=' + encodeURIComponent(TAB) +
       '" title="Presenter notes"></iframe>';
     document.body.appendChild(dock);
     document.getElementById("dock-detach").addEventListener("click", function () { setNotes("detached"); });
     document.getElementById("dock-close").addEventListener("click", function () { setNotes("hidden"); });
+    /* The room's figures sit in the bar; a dock built after the last
+       count arrived asks for them rather than waiting for the next. */
+    if (window.__paintRoomBar) window.__paintRoomBar();
   }
 
   /* The notes are in one of three states and never two, which is enforced
    * here rather than by each control remembering to undo the other. They
-   * were separate flags first, and pressing P after detaching docked a
+   * were separate flags first, and the notes key pressed after detaching docked a
    * second copy beside the deck: the script back on the shared screen,
    * which is the one thing this is all arranged to prevent.
    *
@@ -699,7 +745,23 @@
    *   docked     an iframe on /presenter, beside the deck
    *   detached   the same page in a window of its own
    */
+  /* A deck opened from another machine is sent without its notes, and
+     the page says so. Asking for them there opens nothing, since there is
+     nothing on this machine to show and the notes window would only be
+     refused, and says where they are instead, on the strip the reset
+     uses, and briefly. */
+  var NOTES_HERE = deck.getAttribute("data-notes") !== "off";
+
+  function tell(text, ms) {
+    ask.textContent = text;
+    document.body.classList.add("asking", "asked");
+    setTimeout(function () { document.body.classList.remove("asking", "asked"); }, ms || 1800);
+  }
+
+  function notHere() { tell("The notes open on the machine giving the talk, not on this one."); }
+
   function setNotes(mode) {
+    if (!NOTES_HERE && mode !== "hidden") { notHere(); mode = "hidden"; }
     if (mode !== "detached" && detached()) {
       win.close();
       win = null;
@@ -728,7 +790,7 @@
   function notesShowing() { return docked() || detached(); }
 
   /* A reload keeps the detached window open and loses the handle to it,
-     so the deck came back believing the notes were hidden: P then docked
+     so the deck came back believing the notes were hidden: the notes key then docked
      a second copy beside the deck, the script on the shared screen. The
      window is named for this deck, so it can be taken back by name; it is
      only asked for once a window has answered the roll-call, because
@@ -746,15 +808,38 @@
     if (bus) bus.postMessage({ from: "deck", type: "roll-call", tab: TAB });
   }
 
-  /* P shows the notes, or hides whichever way they are showing. */
+  /* N shows the notes, or hides whichever way they are showing. */
   function toggleNotes() { setNotes(notesShowing() ? "hidden" : "docked"); }
 
   /* D moves them between beside the deck and a window of their own. */
   function toggleDetached() { setNotes(detached() ? "docked" : "detached"); }
 
+  /* Full screen with the notes docked would put the script on the
+     projector, so F takes them off first, into their own window. It cannot
+     do both on one press: a browser gives a key press one window-changing
+     act, and the second is refused; and a window opened once the deck is
+     full screen takes it out of full screen. So this press moves the notes,
+     and the next F, here, goes full screen. A blocked window leaves the
+     notes docked, says so, and does not go full screen over them. */
+  function toProjector() {
+    setNotes("detached");
+    if (detached()) tell("The notes are in their own window. Press F here for full screen.", 4000);
+  }
+  /* The docked notes are this page's own iframe, so D pressed in them
+     calls straight through, inside the key's own gesture: opening the
+     window from a message that arrived a moment later is what a popup
+     blocker refuses. */
+  window.__toggleDetached = toggleDetached;
+
   if (bus) {
     bus.onmessage = function (ev) {
       var m = ev.data || {};
+      if (m.from === "deck") {
+        if (m.type === "tab-check" && m.tab === TAB && born < m.born && !leaving) {
+          bus.postMessage({ from: "deck", type: "tab-taken", tab: TAB, born: m.born });
+        } else if (m.type === "tab-taken" && m.tab === TAB && m.born === born) renew();
+        return;
+      }
       if (m.from !== "presenter") return;
       /* Addressed to another deck window: its panel, not ours. A panel
          opened by hand carries no tab and is answered by every deck, which
@@ -766,6 +851,11 @@
       if (m.type === "hello") { if (m.detached) reclaim(); publish(); return; }
       if (m.type === "here") { reclaim(); return; }
       if (m.type === "attach") { setNotes("docked"); return; }
+      /* The detached window's own close: the deck is the one that opened
+         it, so the deck is the one that can shut it, and the notes end up
+         hidden rather than put back beside the slides. */
+      if (m.type === "close") { setNotes("hidden"); return; }
+      if (m.type === "detach") { setNotes("detached"); return; }
       /* The notes ask before sending this, in their own window, so it
          arrives already confirmed. It forgets silently: the deck window
          is the one on the projector, and a reset between run-throughs is
@@ -852,9 +942,10 @@
     }
     /* Space is deliberately unbound: the arrows are the
        navigation, and a key that quietly did the same thing was a second
-       answer to a question that should have one. PageDown and `n` remain,
-       being what a clicker sends. */
-    if (k === "PageDown" || k === "n") next();
+       answer to a question that should have one. PageDown remains, being
+       what a clicker sends for forward; `n` did too, until it became the
+       notes key, so a clicker that sends `n` now opens the notes. */
+    if (k === "PageDown") next();
     else if (k === "PageUp" || k === "Backspace") back();
     else if (k === "ArrowRight") go("right");
     else if (k === "ArrowLeft") go("left");
@@ -863,18 +954,22 @@
     else if (k === "ArrowUp") go("up");
     else if (k === "Home") jump(0);
     else if (k === "End") jump(slides.length - 1);
-    else if (k === "p" || k === "P") toggleNotes();
+    else if (k === "n" || k === "N") toggleNotes();
     else if (k === "d" || k === "D") toggleDetached();
     else if (k === "c" || k === "C") audit();
     else if (k === "r" || k === "R") confirmReset();
     else if (k === "o" || k === "O") { overview(); }
     else if (k === "m" || k === "M") { minimapOn(!document.body.classList.contains("minimap")); }
+    /* Said for the room, where the talk has one: this window takes it.
+       Nothing here knows whether anything is listening. */
+    else if (k === "h" || k === "H") { deck.dispatchEvent(new CustomEvent("claimroom")); }
     else if (k === "Enter") {
       if (!document.body.classList.contains("overview")) return;
       openSlide(at());
     }
     else if (k === "f" || k === "F") {
       if (document.fullscreenElement) document.exitFullscreen();
+      else if (docked()) toProjector();
       else document.documentElement.requestFullscreen();
     }
     /* The notes' own keys, forwarded rather than acted on. Docked, the
@@ -901,6 +996,7 @@
   window.addEventListener("resize", fit);
 
   var saved = restore();
+  if (bus) bus.postMessage({ from: "deck", type: "tab-check", tab: TAB, born: born });
   rollCall();                          // a detached window of this tab's, if any, answers
   if (saved) {
     if (saved.marks && typeof saved.marks === "object") marks = saved.marks;

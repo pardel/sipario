@@ -451,13 +451,13 @@
 
   document.getElementById("timer-btn").addEventListener("click", timer);
 
-  /* ---- going back to the deck
+  /* ---- going back to the deck, or away
    *
-   * The mirror of the dock's detach button. It only means anything in a
-   * window of its own: inside the dock's iframe the notes are already
-   * beside the deck, and the control there is `detach`.
+   * A window of its own wears the dock's header: the same bar, with attach
+   * where the dock has detach, and the same close. Inside the dock's iframe
+   * the dock's own bar is already above this page, so this one stands down.
    */
-  if (inFrame) document.getElementById("attach-row").style.display = "none";
+  if (inFrame) document.getElementById("notes-bar").style.display = "none";
 
   function attach() {
     if (inFrame) return;
@@ -472,6 +472,33 @@
   }
 
   document.getElementById("attach-btn").addEventListener("click", attach);
+
+  /* Close hides the notes, as N does in the deck. The deck opened this
+     window, so the deck closes it; one it did not open says so instead. */
+  function closeNotes() {
+    send({ type: "close" });
+    if (inFrame) return;
+    window.close();
+    setTimeout(function () {
+      document.getElementById("attach-note").textContent =
+        "Hidden. You can close this window.";
+    }, 250);
+  }
+
+  document.getElementById("close-btn").addEventListener("click", closeNotes);
+
+  /* D is the deck's key for moving the notes, and it has to work with the
+     notes in focus too, which is where the hands are once the script has
+     been clicked or scrolled. In a window of its own it attaches; docked,
+     it asks the deck to detach, calling through while the key is still
+     the user's gesture, and by message only if that is refused. */
+  function moveNotes() {
+    if (!inFrame) { attach(); return; }
+    try {
+      if (window.parent.__toggleDetached) { window.parent.__toggleDetached(); return; }
+    } catch (e) { /* not the deck's frame after all */ }
+    send({ type: "detach" });
+  }
 
   /* ---- putting a preview away
    *
@@ -617,7 +644,7 @@
     /* Space is unbound here too, so the two windows answer to the same
        keys and neither surprises the other. */
     if (asking) { resolveReset(k === "t" || k === "T" || k === "Enter"); ev.preventDefault(); return; }
-    if (k === "PageDown" || k === "n") send({ type: "next" });
+    if (k === "PageDown") send({ type: "next" });
     else if (k === "PageUp" || k === "Backspace") send({ type: "back" });
     else if (k === "ArrowRight") send({ type: "go", dir: "right" });
     else if (k === "ArrowLeft") send({ type: "go", dir: "left" });
@@ -626,7 +653,8 @@
     else if (k === "ArrowUp") send({ type: "go", dir: "up" });
     else if (k === "t" || k === "T") timer();
     else if (k === "m" || k === "M") send({ type: "map" });
-    else if (k === "a" || k === "A") attach();
+    else if (k === "n" || k === "N") closeNotes();
+    else if (k === "d" || k === "D") moveNotes();
     else if (panelKey(k)) { /* handled */ }
     else return;
     ev.preventDefault();

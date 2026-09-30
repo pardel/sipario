@@ -1,5 +1,6 @@
 name: Stylish
 title: Stylish — a theatre bill in black and red
+audience: local
 
 # Title
 
@@ -27,15 +28,15 @@ align: tight
 - (slate) `↓ ↑` Next and previous step, then slide, within a part
 - (slate) `Home / End` First and last slide
 - (slate) `Shift ↑` Top of the current part
-- (slate) `P` Show or hide the notes beside the deck
+- (slate) `N` Show or hide the notes beside the deck
 - (slate) `D` Move the notes to their own window, or bring them back
-- (slate) `A` In that window, put them back beside the deck
 - (slate) `1 / 2` In the notes, hide or show the current or the next slide
 - (slate) `+ / -` In the notes, a bigger or a smaller script
 - (slate) `O` Overview of every slide; the arrows move the selection
 - (slate) `Enter` In the overview, show the selected slide
 - (slate) `M` A map of the talk in the corner, here and in the notes, marking where you are
-- (slate) `F` Full screen
+- (slate) `F` Full screen; docked notes move to their own window first
+- (slate) `H` Make this window the one the room's phones follow
 - (slate) `C` Check every slide for content running off the stage
 - (slate) `R` Back to the start, forgetting where each movement was left
 - (slate) `?` This help
@@ -68,6 +69,7 @@ The curtain comes down between the acts.
 - A file under its path
 - A figure, whole or in layers
 - An acrostic
+- A poll, put to the room
 - The closing page
 
 ```notes
@@ -84,7 +86,7 @@ subtitle: A kicker above, a standfirst below, the rule, and a name
 author: Mario Rossi
 
 ```notes
-The title template, shown as one of the twelve. The deck's own opening
+The title template, shown as one of the thirteen. The deck's own opening
 slide uses it too; this one is here so the programme runs in order.
 ```
 
@@ -97,7 +99,7 @@ letter: A
 A letter the size of the stage, a word, a rule and a line.
 
 ```notes
-The section template, shown as one of the twelve. The one that opened
+The section template, shown as one of the thirteen. The one that opened
 this movement uses it too, with the programme under its line.
 ```
 
@@ -297,7 +299,27 @@ An acrostic is the shape a framework's name makes. A letter, a word
 and a gloss, per row.
 ```
 
-## 3.14 12. The closing page
+## 3.14 12. A poll, put to the room
+id: 3-a-poll-put-to-the-room
+template: poll
+
+```poll
+id: how-you-present
+question: What do you give a talk from today?
+- Keynote or PowerPoint
+- Google Slides
+- A browser, from a markdown file
+- Whatever the venue's laptop has
+```
+
+```notes
+A poll is a fenced block beside the script: an id, a question and the
+options. Phones in the room answer it while the slide is up, and the bars
+grow as they do. The address to answer at fills itself in once the room
+is open.
+```
+
+## 3.15 13. The closing page
 id: 3-the-closing-page
 template: close
 colophon: a colophon along the foot · one dot between its parts
@@ -308,7 +330,7 @@ colophon: a colophon along the foot · one dot between its parts
   And a line saying what is there
 
 ```notes
-The close template, shown as the last of the twelve. The deck's own last
+The close template, shown as the last of the thirteen. The deck's own last
 slide uses it too, one movement on.
 ```
 
@@ -326,7 +348,16 @@ colophon: starters/stylish · docs/AUTHORING.md · docs/TEMPLATES.md
 - `docs/TEMPLATES.md`
   What a template is handed, what it returns, and how to add a tenth
 
+```feedback
+- rate: How useful was this, overall?
+- rate: How was the pace?
+- ask: What would you change?
+```
+
 ```notes
 Copy this folder, rewrite the slides, keep the shape. The look is in
 deck.css and templates/, and it comes with the copy.
+
+From this slide on, the phones in the room show the feedback form above
+it, and what they send is kept for `sipario results`.
 ```

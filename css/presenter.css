@@ -38,7 +38,8 @@ html, body {
   grid-template-columns: minmax(140px, 34%) 1fr;
   grid-template-rows: auto 1fr;
   gap: 18px;
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 18px;
   box-sizing: border-box;
 }
@@ -115,7 +116,10 @@ h4 {
    the dark ground. M, on the deck or here, shows or hides both maps. */
 #notes-map {
   grid-column: 2;
-  grid-row: 1 / span 8;
+  /* One row, beside the clock. It spanned eight while the room had a
+     section under the clock, and empty rows still keep their gaps: seven
+     of them, some 126px taken from the script once the section went. */
+  grid-row: 1;
   display: grid;
   grid-auto-flow: column;
   justify-content: end;
@@ -171,21 +175,13 @@ h4 {
 .shelf.hidden .eye { color: var(--ink-lit-dimmer); }
 .shelf.hidden h4 { margin-bottom: 0; }
 
-#attach-row { display: flex; align-items: center; gap: 10px; }
+/* The header is the dock's own bar (`.notes-bar`, in theme.css); only
+   where it sits in this page is said here. The page is a column so the
+   bar takes its height and the grid below takes the rest. */
+body { display: flex; flex-direction: column; }
+#notes-bar { flex: 0 0 auto; }
+#attach-note { font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; }
 
-#attach-btn {
-  padding: 5px 12px;
-  font: inherit;
-  font-size: 12px;
-  color: var(--ink-lit-faint);
-  background: none;
-  border: 1px solid var(--hairline-deep);
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-#attach-btn:hover { color: var(--ink-lit); border-color: var(--accent); }
-#attach-note { font-size: 11px; color: var(--accent-lit); }
 
 #clock {
   font-family: var(--mono);

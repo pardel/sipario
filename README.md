@@ -66,6 +66,7 @@ the same one.
 | `sipario renumber <deck.md>` | rewrite slide numbers and id prefixes from position |
 | `sipario export pdf [dir]` | the deck as a PDF, a page per step, at the stage's size |
 | `sipario export pptx [dir]` | the deck as PowerPoint, a picture per step, the script in its notes |
+| `sipario results [dir]` | what the room said in the latest session, as JSON and CSV in the current folder |
 
 `sipario-serve` and `sipario-renumber` are the same two commands under
 their own names, for the talks that already have them in their npm
@@ -154,12 +155,14 @@ template: [`docs/TEMPLATES.md`](docs/TEMPLATES.md).
 | <kbd>↓</kbd> <kbd>↑</kbd> | down and up the movement, stepping any build on the way |
 | <kbd>O</kbd> | the map: every slide at once, <kbd>Enter</kbd> to go to one |
 | <kbd>M</kbd> | the minimap, on by default: the talk's shape in the corner, the slide you are on lit |
-| <kbd>P</kbd> | the notes, docked beside the deck |
+| <kbd>N</kbd> | the notes, docked beside the deck |
 | <kbd>D</kbd> | the notes, in a window of their own, and back |
 | <kbd>1</kbd> <kbd>2</kbd> | in the notes, hide or show the current or the next slide, and give the room back to the script |
 | <kbd>+</kbd> <kbd>-</kbd> | in the notes, a bigger or a smaller script, for how far the lectern is from your eyes |
 | <kbd>T</kbd> | the clock: start, pause, then reset |
 | <kbd>R</kbd> | forget where each movement was left |
+| <kbd>F</kbd> | full screen; with the notes docked, the first press moves them to a window of their own, so the script never reaches the projector, and the second goes full screen |
+| <kbd>H</kbd> | in a talk with a room, make this window the one the phones follow; going full screen does the same |
 | <kbd>C</kbd> | measure every step against the stage and name what overflows |
 
 The slides move the way the deck does. Press <kbd>→</kbd> and the slide
@@ -179,7 +182,35 @@ corner when it has not, so neither ever straddles the edge.
 The notes are off until asked for, deliberately: a panel that opened by
 itself would put your script on whatever screen the deck is being shared
 to. Docked and detached are the same page, an iframe on `/presenter`, so
-a fix to one cannot miss the other.
+a fix to one cannot miss the other. The notes, and the print page, are
+served to the machine running `serve` and to nothing else: the deck may be
+opened from another machine to mirror the room's screen, but it arrives
+there without its script.
+
+**The audience can join from their phones.** `audience: local` in the
+deck's head, and `sipario serve` prints an address for phones on the same
+network. They react, say whether you are going too fast or too slow,
+answer the polls you put in the deck as ```` ```poll ```` blocks, and fill
+in a feedback form at the end. You see the phones, the reactions, the pace
+and a poll's answers in the notes' header bar; the room's
+screen shows only the join address and a poll's answers, drawn by your
+talk's own `poll` template. With the room open the deck itself listens on
+your machine alone, so the notes never reach the network, and a room that
+cannot be reached is said once in that bar while the talk carries on.
+The example's title slide shows a QR code of the address to join at, and
+each phone shows the slide on stage, at the step the room is on and never
+one further on.
+Any number of deck windows may be open, but the room follows one: the
+first to open, until another goes full screen or is given <kbd>H</kbd>, and
+the notes say which. A second tab opened to check a slide moves nothing on
+anyone's phone.
+`sipario results` writes what the room said as JSON and CSV. No accounts,
+no names, no addresses kept. The keys, the blocks and where results live:
+[`docs/AUTHORING.md`](docs/AUTHORING.md#the-room).
+
+The example talk opens the room, so a talk started from it does too;
+delete the `audience:` line, the poll slide and the ```` ```feedback ````
+block to go without.
 
 ## On paper, and in PowerPoint
 
@@ -218,7 +249,7 @@ last one's scripts.
 ## Using it as a library
 
 ```js
-const { render, talk, serve, talkChecks, exportPdf, exportPptx } = require('sipario');
+const { render, talk, serve, talkChecks, exportPdf, exportPptx, exportResults } = require('sipario');
 const fs = require('fs');
 
 const t = talk('./talk');
@@ -228,7 +259,12 @@ serve('./talk', { port: 9999 });
 
 await exportPdf('./talk', { out: 'deck.pdf' });     // { file, pages, ... }
 await exportPptx('./talk', { out: 'deck.pptx' });   // { file, slides, ... }
+exportResults('./talk');                            // { json, csv, record, sessions }
 ```
+
+`createRelay` and `paceReading` are the room's two halves as a library:
+the relay's state, and the rule that turns the phones' pace signals into
+one reading, which is kept apart so a talk's owner can reshape it.
 
 `talk()` returns the three paths `render` needs. There is no default:
 this library has no talk of its own, and a default would render somebody
@@ -258,7 +294,7 @@ way and both are one assertion in there: the slide off-centre when stacks
 became grid items, and the slide unscaled when a leftover call to a
 deleted function killed the script on its first line.
 
-The loop around that suite, what the 217 checks cover, and what to run
+The loop around that suite, what the 278 checks cover, and what to run
 before calling a change done: [`docs/DEVELOPING.md`](docs/DEVELOPING.md).
 
 ## What it does not do

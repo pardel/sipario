@@ -1,4 +1,11 @@
-{{! The slide the room arrives on. }}
+{{! The slide the room arrives on.
+
+    Where the talk opens the room, the deck draws the address phones
+    join at into the two marked elements: a QR code into `data-join-qr`
+    and the address as text into `data-join`. The sheet keeps the pair
+    out of sight until then, so a deck with no room, and the deck on
+    paper, where a network address would be dead by the time anyone read
+    it, show nothing there. }}
 
 {{#meta.kicker}}<p class="title-kicker">{{meta.kicker}}</p>{{/meta.kicker}}
 <h1>{{meta.title|br}}</h1>
@@ -7,3 +14,8 @@
 <hr class="rule">
 
 <p class="title-author">{{meta.author}}</p>
+
+<figure class="title-join">
+  <div class="title-qr" data-join-qr></div>
+  <figcaption class="title-address" data-join></figcaption>
+</figure>

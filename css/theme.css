@@ -465,7 +465,7 @@ body.overview #compass { display: none; }
 
 body.docked #dock { display: flex; }
 
-#dock-bar {
+.notes-bar {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -479,13 +479,57 @@ body.docked #dock { display: flex; }
   color: var(--accent-lit);
 }
 
-#dock-bar span { margin-right: auto; }
+.notes-bar button:first-of-type { margin-left: auto; }
 
-#dock-bar button {
-  padding: 4px 9px;
-  font: inherit;
-  font-size: 10px;
-  letter-spacing: 1px;
+/* The bar carries no word of its own, only its name for a screen reader:
+   the room at a glance opens it, set as figures rather than as small
+   capitals (the phones connected, their reactions, the pace), and the
+   controls close it. The pace gives way first when the bar is narrow. */
+.notes-bar .bar-room {
+  font-family: var(--body);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-lit);
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+  flex: 0 0 auto;
+}
+
+.notes-bar .bar-room:empty { display: none; }
+
+.notes-bar .bar-room + .bar-room { margin-left: 10px; }
+
+.notes-bar .bar-pace {
+  flex: 0 3 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--ink-lit-dim);
+}
+
+/* Only when something needs the speaker: in the accent, and the last to
+   give way to a narrow bar; the whole of it is in its tooltip. */
+.notes-bar .bar-alert {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--accent-lit);
+}
+
+/* The bar is the dock's and the detached window's alike: one class, so
+   the notes wear the same header wherever they are. Drawn controls, a
+   little larger to hit than the words they replaced. */
+.notes-bar button {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 30px;
+  padding: 0;
   color: var(--ink-lit-dim);
   background: none;
   border: 1px solid var(--hairline-deep);
@@ -493,7 +537,11 @@ body.docked #dock { display: flex; }
   cursor: pointer;
 }
 
-#dock-bar button:hover { color: var(--ink-lit); border-color: var(--hairline-deep-lit); }
+.notes-bar button svg { display: block; }
+
+.notes-bar button:hover { color: var(--ink-lit); border-color: var(--hairline-deep-lit); }
+
+.notes-bar button:focus-visible { outline: 2px solid var(--accent-lit); outline-offset: 2px; }
 
 #dock-frame {
   flex: 1 1 auto;
@@ -704,3 +752,40 @@ body.audit #audit { display: block; }
 #audit li { font-size: 17px; line-height: 1.7; }
 #audit li b { color: var(--accent-lit); font-variant-numeric: tabular-nums; }
 #audit p { font-size: 15px; color: var(--ink-lit-dim); }
+
+/* ---------------------------------------------------- the room's reactions
+ *
+ * Only for a deck that asks, with `audience-reactions: stage`; otherwise
+ * they are the presenter window's alone and nothing here is drawn. They
+ * rise up the right-hand edge of the window, outside the slide's own
+ * content, and are gone in a couple of seconds: a murmur, not a feed.
+ * `--drift` is set per reaction by the runtime so they do not stack.
+ */
+
+#reactions {
+  position: fixed;
+  right: 3vw;
+  bottom: 0;
+  width: 120px;
+  height: 70vh;
+  z-index: 30;
+  pointer-events: none;
+}
+
+.reaction {
+  position: absolute;
+  bottom: 0;
+  left: calc(50% + var(--drift, 0) * 1px);
+  font-size: 34px;
+  animation: reaction-rise 2400ms ease-out forwards;
+}
+
+@keyframes reaction-rise {
+  from { transform: translateY(0); opacity: 1; }
+  to   { transform: translateY(-60vh); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reaction { animation: reaction-still 2400ms forwards; }
+  @keyframes reaction-still { from { opacity: 1; } to { opacity: 0; } }
+}

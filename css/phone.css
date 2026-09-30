@@ -1,0 +1,148 @@
+/* The page a phone in the room opens.
+ *
+ * It is the library's own, like the presenter window, and carries none
+ * of the talk's design: it is held in a hand under a table, read in a
+ * dark room, and pressed with a thumb. So it is large, plain, and follows
+ * the phone's own light or dark setting.
+ */
+
+:root {
+  --ground: #ffffff;
+  --ground-well: #f1f5f9;
+  --ink: #0f172a;
+  --ink-soft: #475569;
+  --accent: #0d9488;
+  --accent-ink: #ffffff;
+  --hairline: #e2e8f0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #0f172a;
+    --ground-well: #1e293b;
+    --ink: #f1f5f9;
+    --ink-soft: #94a3b8;
+    --accent: #14b8a6;
+    --accent-ink: #0f172a;
+    --hairline: #334155;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; background: var(--ground); color: var(--ink); }
+
+body {
+  font: 17px/1.45 -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 18px 18px 28px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The slide on stage, the full width of the phone, above everything.
+   The frame holds a 1280x720 page and is scaled to fit by `--k`, which
+   the page's script sets from the width it has; one arriving waits
+   unseen until it has loaded, then replaces the last. */
+#screen {
+  position: relative;
+  margin: -18px -18px 16px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--ground-well);
+}
+
+#screen iframe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1280px;
+  height: 720px;
+  border: 0;
+  transform-origin: 0 0;
+  transform: scale(var(--k, 0.3));
+  pointer-events: none;
+}
+
+#screen iframe.incoming { visibility: hidden; }
+
+header h1 { font-size: 20px; line-height: 1.25; margin: 0; }
+
+#status { margin: 4px 0 0; font-size: 13px; color: var(--ink-soft); }
+
+main { flex: 1; padding: 24px 0; }
+
+h2 {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 22px 0 10px;
+}
+
+main > * > h2:first-child { margin-top: 0; }
+
+button {
+  font: inherit;
+  color: var(--ink);
+  background: var(--ground-well);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:active { transform: scale(0.96); }
+
+/* Big enough for a thumb in the dark: every target is at least 48px. */
+.reactions { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.reaction { font-size: 30px; min-height: 60px; }
+
+.pace { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pace-button { min-height: 52px; font-size: 16px; }
+.pace-button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+.question { font-size: 21px; line-height: 1.3; font-weight: 600; margin: 0 0 16px; }
+
+.options { display: grid; gap: 10px; }
+.option { min-height: 56px; padding: 12px 16px; text-align: left; font-size: 17px; }
+.option[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+.field { margin: 0 0 22px; }
+.ask { margin: 0 0 10px; font-weight: 600; }
+
+.scale { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.score { min-height: 52px; font-size: 19px; }
+.score[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+.text {
+  width: 100%;
+  font: inherit;
+  color: var(--ink);
+  background: var(--ground-well);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.send {
+  width: 100%;
+  min-height: 54px;
+  font-weight: 600;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+/* The poll or the form, when there is one, and then the reactions and
+   the pace, which are always there. A rule between them says they are
+   separate things to answer. */
+.asked:empty { display: none; }
+.asked { padding-bottom: 22px; margin-bottom: 22px; border-bottom: 1px solid var(--hairline); }
+
+.said { min-height: 1.4em; margin: 6px 0 0; font-size: 13px; color: var(--ink-soft); }
+
+footer p { margin: 0; font-size: 12px; color: var(--ink-soft); }

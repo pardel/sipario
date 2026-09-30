@@ -23,6 +23,9 @@ const { scaffold } = require('./lib/scaffold.js');
 const { exportPdf, exportPptx, outline } = require('./lib/export.js');
 const { findBrowser } = require('./lib/browser.js');
 const { pptx } = require('./lib/pptx.js');
+const { createRelay } = require('./lib/relay.js');
+const { paceReading } = require('./lib/pace.js');
+const { exportResults, dataDir } = require('./lib/results.js');
 
 /* Where the shared half lives on disk, for a suite that has to read it. */
 const paths = {
@@ -37,4 +40,5 @@ module.exports = {
   deckPage, presenterPage, printPage, errorPage,
   talkChecks, scaffold, paths,
   exportPdf, exportPptx, outline, findBrowser, pptx,
+  createRelay, paceReading, exportResults, dataDir,
 };

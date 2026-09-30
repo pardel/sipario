@@ -36,6 +36,7 @@
     "stylish": "node bin/sipario.js serve starters/stylish"
   },
   "devDependencies": {
-    "jsdom": "^30.0.1"
+    "jsdom": "^30.0.1",
+    "jsqr": "1.4.0"
   }
 }

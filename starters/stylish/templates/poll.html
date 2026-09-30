@@ -1,0 +1,22 @@
+{{! A question put to the room, and the room's answers as they arrive.
+
+    Each option is marked with `data-option`, its place in the list,
+    which is how the deck finds it: it writes how many chose it as
+    `data-votes` and its part of all the answers as `--share`, and this
+    template's sheet draws the bar. On paper nothing has been answered,
+    and the options print bare.
+
+    The join line fills itself. The deck writes the address phones open
+    into whatever carries `data-join`, and the sheet keeps the line out
+    of sight until there is one. }}
+
+<h2>{{meta.title|br}}</h2>
+<hr class="rule">
+
+<p class="poll-question">{{poll.question}}</p>
+
+<ol class="poll-options">
+  {{#poll.options join="\n"}}<li class="poll-option" data-option="{{index}}"><span class="poll-text">{{text}}</span></li>{{/poll.options}}
+</ol>
+
+<p class="poll-join">Answer on your phone at <b class="poll-address" data-join></b></p>

@@ -6,6 +6,150 @@ so a break ships as a minor and this file is the whole of the warning.
 
 ## Unreleased
 
+- **Added:** the room. `audience: local` in a deck's head, and `serve`
+  runs a relay and a listener for phones on the same network, one port
+  above the deck's, and prints the address to join at. The phones follow
+  the slide: five reactions and the pace (slower, just right, faster)
+  between polls, the poll while one is on the stage, and the feedback
+  form from its step to the end. `audience: https://…` names a relay
+  elsewhere that speaks the same protocol; none ships here. A deck
+  without the key loads nothing and makes no request. Anonymous: a phone
+  keeps a random token of its own, no name or address is read, and
+  reactions, pace and votes are rate-limited per phone and per room.
+- **Added:** the presenter window shows the room by the clock: where to
+  join, how many phones, the reactions as counts, the pace as one needle
+  (over the last minute, one voice a phone, no reading under three), a
+  poll's answers as they arrive, and, when the relay cannot be reached,
+  one line saying so while the talk carries on. `audience-reactions:
+  stage` floats reactions over the slide as well; by default the room's
+  screen never shows them.
+- **Added:** ```` ```poll ```` blocks, with a declared `id:`, a
+  `question:` and `- ` options, drawn by the talk's own `poll` template,
+  which is handed `poll` and marks each option `data-option`. The deck
+  writes `data-votes` and `--share` on them as the room answers, and the
+  join address into anything marked `data-join`. One vote a phone, the
+  last one standing. The phones go on offering a poll for the rest of its
+  movement after its slide, and the presenter window says so while they
+  do; the relay decides which poll is open from where the deck is, and a
+  vote for any other is refused. On paper a poll prints with no answers. Both
+  starters gain a `poll` template and a slide of it.
+- **Added:** a ```` ```feedback ```` block, `- rate:` (1 to 5) and
+  `- ask:` (text) questions, shown on the phones from its step to the
+  end. Typed answers reach the results and never a screen. Both starters
+  carry one on their closing slide.
+- **Added:** `sipario results [dir] [--session id]`: a session's polls,
+  reactions, pace by slide and feedback as JSON and as one long CSV, in
+  the folder the command ran from. Sessions are written as the room
+  speaks to the machine's data folder, never the talk
+  (`~/Library/Application Support/sipario` on a Mac; `SIPARIO_DATA`
+  moves it). `createRelay`, `paceReading`, `exportResults` and `dataDir`
+  join the library's surface.
+- **Break:** a fence opened ```` ```poll ```` or ```` ```feedback ```` was
+  a transcript and is now structure. It no longer reaches the stage, and
+  it stops the render in a deck with no `audience:`, on a template that
+  never prints a poll, or when it is malformed: each reason named. No
+  rule was added to `talkChecks`, but a consumer's suite renders through
+  these refusals, so it fails on them too.
+- **Break:** with the room open the deck listens on 127.0.0.1 alone, so
+  `/presenter`, `/print` and the talk's files never reach the network the
+  phones are on. A deck opened from another machine needs the room off.
+  Binding to a named host is not immediate, so in that case `serve()`
+  returns a server that is listening only once its `listening` event has
+  fired; read `address()` after it. Without the room nothing changes.
+- **Added:** a QR code of the join address, drawn by the deck into any
+  element a template marks `data-join-qr`, as inline SVG in
+  `currentColor`; both starters' title slides carry one, with the
+  address under it. The encoder is sipario's own (`js/qr.js`: byte mode,
+  level M, versions 1 to 10, the mask by the standard's penalty), and the
+  suite reads every code it draws back with a decoder it did not write.
+  It is not printed: `/print` and the export leave it out, since a
+  network address on paper is dead once the talk is over. The address is
+  the room's network's, passing over a VPN on the default route and
+  virtual bridges; `serve` prints which interface, and
+  `SIPARIO_JOIN_HOST` names another.
+- **Added:** each phone in the room shows the slide on stage, the real
+  one in the talk's own look, at the step the room is on, and swaps it as
+  the talk moves. Under it, the poll while one is open and the feedback
+  form once it is, and under those the reactions and the pace, which are
+  never hidden to make room. A poll arriving never moves the page under
+  somebody scrolled down it, and the form keeps what is being typed into
+  it, cursor and all, whatever the talk does meanwhile. A phone
+  is only ever sent a step the room has been shown, one at a time from
+  `/slide/<id>/<step>`: nothing further on, no rows a build has still to
+  show (elements marked `hidden-step` or `ghost` are kept as empty boxes
+  at the size the deck measured, so the phone's layout is the stage's to
+  the pixel), and no
+  script. The phone listener now serves the talk's look for it, its
+  sheets and fonts, and of its images only those the steps already shown
+  refer to, or its stylesheets do (anything else in `images/` is a 404,
+  however the name is written), and a repeat is a 304, so
+  after the first slide a phone moves on for a few kilobytes. If the deck
+  window goes, the phones keep the last slide and say so.
+- **Added:** one deck window drives the room. The relay takes where the
+  talk is, what has been reached and which poll is open from the window
+  that holds the room and ignores the rest, so a second tab opened to
+  check a slide cannot move the phones or show them a slide early. The
+  first deck window to open holds it; going full screen, or <kbd>H</kbd>,
+  takes it; leaving full screen keeps it; a holder that closes gives it
+  up after the reload grace, and nothing takes over by itself. The notes
+  window says whether its deck holds the room and how to take it, and can
+  never hold it. A window is its tab's own id, kept across its reloads; a
+  tab the browser duplicates is given a new one.
+- **Changed:** the keys slide in both starters is set tighter. It had
+  run 17px (minimal) and 41px (stylish) past the stage since the minimap's
+  row, and gains a row for <kbd>H</kbd>.
+- **Changed:** the notes' detach, attach and close controls are drawn
+  rather than written: a box with an arrow leaving it, an arrow into a
+  box, and a cross, inline SVG in the panel's own colours, a little larger
+  to hit than the words were. Each keeps its name for a screen reader
+  ("Detach notes", "Attach notes", "Close notes"), a tooltip with its key,
+  and a visible focus ring. The notes in a window of their own wear the
+  dock's header too, the label and the controls in one bar, and gain a
+  close: it hides the notes, as N does, rather than putting them back.
+- **Fixed:** D did nothing once the notes had the keyboard, which is
+  wherever the hands are after the script has been clicked or scrolled.
+  In the notes, docked, D now detaches them; in their own window it
+  attaches them.
+- **Break:** A no longer attaches the notes from their own window; D
+  does, from either window. A is gone from the help and the keys slide.
+- **Changed:** the notes' header bar carries the room: the phones
+  connected, the reactions as counts and the pace, then, only when there is
+  something to say, a poll still open on the phones, a deck window that
+  does not hold the room, or a relay not answering. The bar prints no
+  "Notes" label, and the notes lose their "The room" section (the join
+  address and the pace needle with it).
+- **Fixed:** an edit to `lib/pages.js` under `serve` changed nothing until
+  a restart: the server kept the page writers it first loaded, so the notes
+  could come out of the old file beside new scripts and sheets. The pages
+  now reload with the renderer.
+- **Fixed:** the notes' script started well below the clock, under the
+  gaps of rows left empty beside the map once the room section went; it
+  now starts under the clock or the map, whichever is taller.
+- **Changed:** F with the notes docked no longer goes full screen with the
+  script on the projector. The first press moves the notes to a window of
+  their own and says so; the next F, in the deck, goes full screen. It
+  takes two presses because a browser gives one key press one
+  window-changing act, and a window opened once the deck is full screen
+  takes it out of full screen. A blocked window leaves the notes docked and
+  the deck out of full screen.
+- **Break:** the notes are shown and hidden with <kbd>N</kbd>, not
+  <kbd>P</kbd>, which now does nothing. Muscle memory, and any script
+  that says "press P", need changing.
+- **Break:** <kbd>n</kbd> no longer steps forward, in the deck or in the
+  notes. A clicker that sends `n` now shows and hides the notes; one that
+  sends PageDown, as most do, still steps forward.
+- **Break:** the script is served to this machine alone, room or no room.
+  `/presenter` (every version of it) and `/print` answer 404 to any
+  request not from loopback, and one carrying a proxy's forwarding header,
+  and the deck page sent to another machine has its notes emptied, so
+  P and D there say where the notes are and open nothing. The deck itself
+  is still served to anyone who can reach it, so a second machine can
+  still mirror the room's screen. A speaker who opened the notes on
+  another device, an iPad beside the lectern say, loses that; run them
+  on the machine serving the talk.
+- **Changed:** the example opens the room, so a talk started with `new`
+  does too. Delete its `audience:` line, the poll slide and the
+  ```` ```feedback ```` block to go without. The export never opens it.
 - **Changed:** on a slide that builds, the minimap's lit cell fills left
   to right as the steps play (half a cell at step one of two), in the
   deck and in the notes. While the map is showing, the step dots at the

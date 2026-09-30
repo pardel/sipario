@@ -21,6 +21,11 @@ const { render, talk, talkChecks, scaffold } = require('./index.js');
 
 const ROOT = __dirname;
 const TALK = talk(path.join(ROOT, 'starters/minimal'));
+
+/* A room's sessions are written to the machine's data folder. Every
+   check, and every process a check starts, writes to a scratch one
+   instead: the suite leaves nothing among the owner's real sessions. */
+process.env.SIPARIO_DATA = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-data-'));
 let failures = 0;
 
 function check(name, fn) {
@@ -80,14 +85,19 @@ function harness(main) {
     { runScripts: 'outside-only', pretendToBeVisual: true, url: 'http://localhost:9999/',
       virtualConsole: vc });
   const { window } = dom;
-  window.EventSource = function () { this.close = () => {}; };   // no server in a test
+  /* No server in a test. What the page asks for is kept, so a check can
+     say what a deck reached for as well as what it did. */
+  const opened = [];
+  const fetched = [];
+  window.EventSource = function (url) { opened.push(url); this.close = () => {}; };
+  window.fetch = (url) => { fetched.push(url); return Promise.reject(new Error('no network in a test')); };
   window.open = () => ({ closed: false, focus() {}, close() { this.closed = true; } });
   Object.defineProperty(window, 'innerWidth', { value: 1600, configurable: true });
   Object.defineProperty(window, 'innerHeight', { value: 900, configurable: true });
   const doc = window.document;
   const key = (k) => doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: k }));
   return {
-    window, doc, errors,
+    window, doc, errors, opened, fetched,
     current: () => doc.querySelector('.slide.current'),
     key,
     forget: () => { key('r'); key('r'); },
@@ -559,11 +569,11 @@ check('Enter plays a build rather than dropping you at its end', () => {
   const build = [...doc.querySelectorAll('.stack')].find((st) => st.children.length > 1);
   if (!build) throw new Error('no build in the deck to test');
   key('o');
-  /* `n` reads forward across movements; the arrows stop at the end of
-     one, which is the distinction the two axes exist for. */
+  /* PageDown reads forward across movements; the arrows stop at the end
+     of one, which is the distinction the two axes exist for. */
   while (current() !== build.children[1]) {
     const was = current();
-    key('n');
+    key('PageDown');
     if (current() === was) throw new Error('reading forward stopped before the build');
   }
   key('Enter');
@@ -1283,11 +1293,12 @@ const presenterJs = fs.readFileSync(path.join(ROOT, 'js/presenter.js'), 'utf8');
 const deckBody = `${MOVES_MAIN}
   <div id="progress"><div id="progress-bar"></div></div>`;
 const presenterBody = `${MOVES_MAIN}
+  <div class="notes-bar" id="notes-bar" aria-label="Notes"><span id="attach-note"></span>
+    <button id="attach-btn"></button><button id="close-btn"></button></div>
   <div id="wrap">
     <div class="shelf" id="now-shelf"><h4><button class="shelf-btn" id="now-btn"></button></h4>
       <div class="shot-box" id="now"></div></div>
     <div class="pane" id="side">
-      <div id="attach-row"><button id="attach-btn"></button><span id="attach-note"></span></div>
       <div id="clock">00:00</div><button id="timer-btn"></button><p id="timer-note"></p>
     </div>
     <div class="shelf" id="next-shelf"><h4><button class="shelf-btn" id="next-btn"></button></h4>
@@ -1526,12 +1537,13 @@ check('a hello from a detached window lets a reloaded deck take it back, whichev
   const tab = first.sessionStorage.getItem('notes-tab');
   /* The deck reloads before its window has moved to the channel: the
      roll-call is unanswered. */
+  first.dispatchEvent(new first.Event('pagehide'));      // the page goes, as a reload takes it
   deckWin = windowFor(deckBody, [js], BUS, undefined, (w) => w.sessionStorage.setItem('notes-tab', tab));
   eq(deckWin.__detached(), false, 'nobody answered the roll-call');
   presWin = windowFor(presenterBody, [presenterJs], BUS, 'http://localhost:9999/presenter?tab=' + tab);
   eq(deckWin.__detached(), true, 'the window\'s hello let the deck take it back');
-  deckWin.document.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
-  eq(deckWin.document.body.classList.contains('docked'), false, 'so P hides rather than docking a second copy');
+  deckWin.document.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'n' }));
+  eq(deckWin.document.body.classList.contains('docked'), false, 'so N hides rather than docking a second copy');
 });
 
 check('the dock says it is not a window, from its first word', () => {
@@ -1581,12 +1593,14 @@ check('a reloaded deck takes its detached window back before P can dock a second
   eq(first.__detached(), true, 'the first deck detached its notes');
   const tab = first.sessionStorage.getItem('notes-tab');
   presWin = windowFor(presenterBody, [presenterJs], BUS, 'http://localhost:9999/presenter?tab=' + tab);
-  /* The deck reloads: a new window with the same tab id, the notes still
-     open. It asks on the way in, and takes the window back. */
+  /* The deck reloads: the page goes, and a new window with the same tab id
+     arrives, the notes still open. It asks on the way in, and takes the
+     window back. */
+  first.dispatchEvent(new first.Event('pagehide'));
   deckWin = windowFor(deckBody, [js], BUS, undefined, (w) => w.sessionStorage.setItem('notes-tab', tab));
   eq(deckWin.__detached(), true, 'the reloaded deck has its window back');
-  deckWin.document.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
-  eq(deckWin.document.body.classList.contains('docked'), false, 'P did not dock a second copy');
+  deckWin.document.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'n' }));
+  eq(deckWin.document.body.classList.contains('docked'), false, 'N did not dock a second copy');
   eq(deckWin.__detached(), false, 'it hid the notes, which is what P does when they show');
 });
 
@@ -1603,9 +1617,9 @@ check('the notes are off until asked for', () => {
   }
 });
 
-check('P docks the notes, and they are the presenter page itself', () => {
+check('N docks the notes, and they are the presenter page itself', () => {
   const d = deckWin.document;
-  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'n' }));
   eq(d.body.classList.contains('docked'), true, 'docked after P');
   const frame = d.getElementById('dock-frame');
   if (!frame) throw new Error('no iframe in the dock');
@@ -1615,17 +1629,17 @@ check('P docks the notes, and they are the presenter page itself', () => {
   if (!/[?&]tab=[^&]+/.test(src)) {
     throw new Error('the dock was not told which deck window owns it: ' + src);
   }
-  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
-  eq(d.body.classList.contains('docked'), false, 'P again hides them');
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'n' }));
+  eq(d.body.classList.contains('docked'), false, 'N again hides them');
 });
 
 check('the deck makes room for the docked notes', () => {
   const d = deckWin.document;
   const at = () => d.querySelector('.slide.current').style;
-  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'n' }));
   const on = at().getPropertyValue('--k');
   const left = at().left;
-  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'n' }));
   const off = at().getPropertyValue('--k');
   if (Number(on) >= Number(off)) {
     throw new Error(`docking did not shrink the deck: ${on} then ${off}`);
@@ -1636,7 +1650,7 @@ check('the deck makes room for the docked notes', () => {
 
 check('D moves the notes to a window and back', () => {
   const d = deckWin.document;
-  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'n' }));
   eq(d.body.classList.contains('docked'), true, 'docked to start');
 
   d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'd' }));
@@ -1644,7 +1658,7 @@ check('D moves the notes to a window and back', () => {
 
   d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'd' }));
   eq(d.body.classList.contains('docked'), true, 'and D again brings them back');
-  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'n' }));
 });
 
 check('the detached window can put the notes back', () => {
@@ -1653,7 +1667,7 @@ check('the detached window can put the notes back', () => {
      pushed onto a projector. */
   const d = deckWin.document;
   d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'Escape' }));
-  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'n' }));
   d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'd' }));
   eq(d.body.classList.contains('docked'), false, 'detached to start');
   eq(deckWin.__detached(), true, 'and the window is open');
@@ -1664,15 +1678,81 @@ check('the detached window can put the notes back', () => {
   eq(deckWin.__detached(), false, 'and closed the window');
 });
 
-check('A in the detached window attaches too', () => {
+check('the detached window wears the dock\'s header, and its close hides the notes', () => {
+  /* One bar for both: the label, then attach where the dock has detach,
+     then the same close. Nothing of the kind is left loose in the body,
+     where the attach button used to sit above the clock. */
+  const pres = require('./lib/pages.js').presenterPage(MOVES_DECK, 9999);
+  const bar = pres.match(/<div class="notes-bar" id="notes-bar"[^>]*aria-label="Notes"[^>]*>([\s\S]*?)\n<\/div>/);
+  if (!bar) throw new Error('the notes page has no header bar named Notes');
+  if (/>Notes</.test(bar[1])) throw new Error('the header still prints the word Notes');
+  for (const name of ['Attach notes', 'Close notes']) {
+    if (!bar[1].includes(`aria-label="${name}"`)) throw new Error(`no ${name} in the header`);
+  }
+  eq(pres.split('id="attach-btn"').length - 1, 1, 'one attach button, and it is in the header');
+  const wrap = pres.slice(pres.indexOf('<div id="wrap">'));
+  if (/aria-label="(Attach|Close) notes"/.test(wrap)) throw new Error('a notes control is still loose in the body');
+  if (!/\.notes-bar\b/.test(fs.readFileSync(path.join(ROOT, 'css/theme.css'), 'utf8'))) {
+    throw new Error('the bar is not one class the dock and the window share');
+  }
+
+  const d = deckWin.document;
+  newPresenter();
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'd' }));
+  eq(deckWin.__detached(), true, 'detached');
+  presWin.document.getElementById('close-btn').dispatchEvent(
+    new presWin.MouseEvent('click', { bubbles: true }));
+  eq(deckWin.__detached(), false, 'close shut the window');
+  eq(d.body.classList.contains('docked'), false, 'and did not dock them: the notes are hidden');
+
+  newPresenter();
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'd' }));
+  presWin.document.dispatchEvent(new presWin.KeyboardEvent('keydown', { key: 'n' }));
+  eq(deckWin.__detached(), false, 'N in the window hides them too');
+  eq(d.body.classList.contains('docked'), false, 'still not docked');
+});
+
+check('D works with the notes in focus: in their window it attaches, docked it detaches', () => {
+  /* The notes take the keys once they have been clicked, so the deck's D
+     has to be answered there too, both ways round. */
+  const d = deckWin.document;
+  newPresenter();
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'd' }));
+  eq(deckWin.__detached(), true, 'detached from the deck');
+  presWin.document.dispatchEvent(new presWin.KeyboardEvent('keydown', { key: 'd' }));
+  eq(d.body.classList.contains('docked'), true, 'D in the window docked them');
+  eq(deckWin.__detached(), false, 'and closed the window');
+
+  /* Docked, the notes are the deck's iframe and call straight through;
+     that call is the deck's own toggle, and the message is its fallback. */
+  eq(typeof deckWin.__toggleDetached, 'function', 'the deck offers its docked frame the toggle');
+  const ch = new BUS(deckWin.document.getElementById('deck').getAttribute('data-deck'));
+  ch.postMessage({ from: 'presenter', type: 'detach' });
+  ch.close();
+  eq(deckWin.__detached(), true, 'a detach from the notes detaches');
+  eq(d.body.classList.contains('docked'), false, 'and nothing is left docked');
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'n' }));
+});
+
+check('A is retired: in the detached window it does nothing, and no key list names it', () => {
+  /* D moves the notes from either window now, so A was a second name for
+     the same act, and one more key to remember at a lectern. */
   const d = deckWin.document;
   newPresenter();                       // the last check closed the previous one
   d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'd' }));
   eq(deckWin.__detached(), true, 'detached');
   presWin.document.dispatchEvent(new presWin.KeyboardEvent('keydown', { key: 'a' }));
-  eq(d.body.classList.contains('docked'), true, 'A docked them');
-  eq(deckWin.__detached(), false, 'and closed the window');
-  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'p' }));
+  presWin.document.dispatchEvent(new presWin.KeyboardEvent('keydown', { key: 'A' }));
+  eq(deckWin.__detached(), true, 'A left the window where it was');
+  eq(d.body.classList.contains('docked'), false, 'and docked nothing');
+  if (/<dt>A<\/dt>/.test(js)) throw new Error('the help overlay still names A');
+  for (const s of ['minimal', 'stylish']) {
+    const src = fs.readFileSync(path.join(ROOT, 'starters', s, 'deck.md'), 'utf8');
+    if (/`A`/.test(src)) throw new Error(`the ${s} keys slide still names A`);
+  }
+  presWin.document.dispatchEvent(new presWin.KeyboardEvent('keydown', { key: 'd' }));
+  eq(deckWin.__detached(), false, 'D put them back');
+  d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'n' }));
 });
 
 check('the notes\' reset clears the clock and the deck\'s bookmarks', () => {
@@ -1880,6 +1960,100 @@ check('a hidden preview is a hidden picture, never a hidden label', () => {
   eq(/class="eye-slash"/.test(page), true, 'the slash is in the markup, so nothing reflows on a press');
 });
 
+check('N shows and hides the notes, P does nothing, n no longer steps forward, and PageDown still does', () => {
+  /* The notes moved from P to N, and N was a second forward key for a
+     clicker; forward is PageDown alone now. */
+  const w = windowFor(deckBody, [js], makeBus());
+  const d = w.document;
+  const key = (k) => d.dispatchEvent(new w.KeyboardEvent('keydown', { key: k }));
+  const at = () => d.querySelector('.slide.current').id;
+  const start = at();
+  key('p');
+  key('P');
+  eq(d.body.classList.contains('docked'), false, 'P docks nothing');
+  eq(d.getElementById('dock'), null, 'and builds no dock');
+  key('n');
+  eq(d.body.classList.contains('docked'), true, 'N docks the notes');
+  eq(at(), start, 'and does not move the deck');
+  key('N');
+  eq(d.body.classList.contains('docked'), false, 'N again hides them, shifted or not');
+  key('PageDown');
+  if (at() === start) throw new Error('PageDown no longer steps forward');
+  if (!/<dt>N<\/dt><dd>Show or hide the notes/.test(js) || /<dt>P<\/dt>/.test(js)) {
+    throw new Error('the help overlay does not say N');
+  }
+  const presenter = fs.readFileSync(path.join(ROOT, 'js/presenter.js'), 'utf8');
+  if (/k === "n"[^\n]*type: "next"/.test(presenter.replace(/\/\*[\s\S]*?\*\//g, ''))) throw new Error('the notes window still steps forward on n');
+});
+
+check('the notes\' controls are drawn, each named for a screen reader and titled with its key', () => {
+  const w = windowFor(deckBody, [js], makeBus());
+  const d = w.document;
+  d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'n' }));
+  const byName = (doc, name) => doc.querySelector(`button[aria-label="${name}"]`);
+  for (const [name, key] of [['Detach notes', '(D)'], ['Close notes', '(N)']]) {
+    const b = byName(d, name);
+    if (!b) throw new Error(`no button named "${name}"`);
+    eq(b.textContent.trim(), '', `${name} carries no word, only its drawing`);
+    if (!b.querySelector('svg[aria-hidden="true"] path')) throw new Error(`${name} is not drawn`);
+    if (!/currentColor/.test(b.innerHTML)) throw new Error(`${name} is not drawn in the text's colour`);
+    if (!b.title.includes(key)) throw new Error(`${name}'s title does not give its key: ${b.title}`);
+  }
+  byName(d, 'Close notes').click();
+  eq(d.body.classList.contains('docked'), false, 'Close notes, found by its name, hides them');
+  d.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'n' }));
+  byName(d, 'Detach notes').click();
+  eq(w.__detached(), true, 'Detach notes, found by its name, detaches them');
+  const pres = require('./lib/pages.js').presenterPage(MOVES_DECK, 9999);
+  const attach = pres.match(/<button id="attach-btn"[^>]*>([\s\S]*?)<\/button>/);
+  if (!attach || !/aria-label="Attach notes"/.test(attach[0])) throw new Error('no button named "Attach notes"');
+  if (!/title="[^"]*\(D\)"/.test(attach[0])) throw new Error('its title does not give its keys');
+  if (!/^<svg[^>]*aria-hidden="true"[\s\S]*<\/svg>$/.test(attach[1].trim())) throw new Error('attach is not drawn, or carries a word');
+  const sheets = fs.readFileSync(path.join(ROOT, 'css/theme.css'), 'utf8') + fs.readFileSync(path.join(ROOT, 'css/presenter.css'), 'utf8');
+  for (const rule of ['.notes-bar button:focus-visible']) {
+    if (!sheets.includes(rule)) throw new Error(`no visible focus for ${rule.split(':')[0]}`);
+  }
+});
+
+check('F with the notes docked moves them to their own window first, and the next F goes full screen', () => {
+  /* One key press buys one window-changing act, so going full screen and
+     opening the notes cannot share it, and a window opened once full
+     screen takes the deck out of it. The notes go first, then the stage. */
+  const w = windowFor(deckBody, [js], makeBus());
+  const d = w.document;
+  let full = 0;
+  d.documentElement.requestFullscreen = () => { full++; return Promise.resolve(); };
+  const key = (k) => d.dispatchEvent(new w.KeyboardEvent('keydown', { key: k }));
+  key('n');
+  eq(d.body.classList.contains('docked'), true, 'docked to start');
+  key('f');
+  eq(d.body.classList.contains('docked'), false, 'F took the notes off the deck');
+  eq(w.__detached(), true, 'into their own window');
+  eq(full, 0, 'and did not go full screen on the same press');
+  if (!/Press F here for full screen/.test(d.getElementById('ask').textContent)) {
+    throw new Error(`the deck does not say what to do next: ${d.getElementById('ask').textContent}`);
+  }
+  key('f');
+  eq(full, 1, 'the next F goes full screen');
+  eq(d.body.classList.contains('docked'), false, 'with the notes still off the deck');
+
+  const bare = windowFor(deckBody, [js], makeBus());
+  let bareFull = 0;
+  bare.document.documentElement.requestFullscreen = () => { bareFull++; return Promise.resolve(); };
+  bare.document.dispatchEvent(new bare.KeyboardEvent('keydown', { key: 'f' }));
+  eq(bareFull, 1, 'with no notes docked, F goes full screen at once');
+  eq(bare.__detached(), false, 'and opens nothing');
+
+  const blocked = windowFor(deckBody, [js], makeBus());
+  let blockedFull = 0;
+  blocked.document.documentElement.requestFullscreen = () => { blockedFull++; return Promise.resolve(); };
+  blocked.open = () => null;
+  blocked.document.dispatchEvent(new blocked.KeyboardEvent('keydown', { key: 'n' }));
+  blocked.document.dispatchEvent(new blocked.KeyboardEvent('keydown', { key: 'f' }));
+  eq(blocked.document.body.classList.contains('docked'), true, 'a blocked window leaves the notes docked');
+  eq(blockedFull, 0, 'and the deck does not go full screen over them');
+});
+
 check('the notes are never docked and detached at once', () => {
   /* Detached means the deck window shows nothing but slides. Any path that
      leaves both showing puts the script back on the shared screen, which
@@ -1888,10 +2062,10 @@ check('the notes are never docked and detached at once', () => {
   const both = () => d.body.classList.contains('docked') && deckWin.__detached();
 
   const paths = [
-    ['p', 'd', 'p'],          // dock, detach, then P out of habit
-    ['d', 'p'],               // detach from cold, then P
-    ['p', 'd', 'd'],          // dock, detach, re-attach
-    ['d', 'd', 'p', 'd'],     // round trip and out again
+    ['n', 'd', 'n'],          // dock, detach, then N out of habit
+    ['d', 'n'],               // detach from cold, then N
+    ['n', 'd', 'd'],          // dock, detach, re-attach
+    ['d', 'd', 'n', 'd'],     // round trip and out again
   ];
   for (const path of paths) {
     d.dispatchEvent(new deckWin.KeyboardEvent('keydown', { key: 'Escape' }));
@@ -1995,6 +2169,1872 @@ check('the presenter says it is following a deck only once one has spoken', () =
   windowFor(deckBody, [js], bus);            // a deck opens and says where it is
   eq(p.document.body.classList.contains('live'), true, 'a deck spoke');
   eq(p.document.body.classList.contains('orphan'), false, 'so it is not an orphan');
+});
+
+// ---------------------------------------------------------------- the room
+
+/* The audience's half of a talk. The relay is state in this process, so
+ * most of what it does is checked by calling it; the pages that talk to
+ * it are run in jsdom with their fetch and their event stream wired
+ * straight to it; and the server is started once, in a process of its
+ * own, to prove what a phone on the network can and cannot reach. */
+
+const { createRelay } = require('./lib/relay.js');
+const audienceJs = fs.readFileSync(path.join(ROOT, 'js/audience.js'), 'utf8');
+const phoneJs = fs.readFileSync(path.join(ROOT, 'js/phone.js'), 'utf8');
+
+/* A deck opened to the room, and a slide of every kind it can hold. */
+const inRoom = (src) => src.replace(/^name: (.*)$/m, 'name: $1\naudience: local');
+const ROOM_DECK = render(inRoom(MOVES_SRC), TALK);
+const ROOM_MAIN = `<main id="deck" data-deck="${ROOM_DECK.deck.key}" data-audience="local">` +
+  `${ROOM_DECK.html}</main>`;
+
+/* A window whose fetch and event stream reach `relay` directly. Streams
+   are kept so a check can say when the relay speaks, and whether it can
+   be reached at all: `down` makes every request fail, as a room with no
+   relay would. */
+function roomWindow(body, scripts, relay, { down = false, bus = makeBus(), url = 'http://localhost:9999/', before } = {}) {
+  const streams = [];
+  const posted = [];
+  const win = windowFor(body, scripts, bus, url, (w) => {
+    if (before) before(w);
+    w.fetch = (url, init) => {
+      const msg = JSON.parse(init.body);
+      posted.push({ url, msg });
+      if (down) return Promise.reject(new Error('the relay is down'));
+      const r = (url.endsWith('/phone') ? relay.fromPhone : relay.fromDeck)(msg);
+      return Promise.resolve({ ok: r.status === 200, status: r.status,
+                               json: () => Promise.resolve(r.body) });
+    };
+    w.EventSource = function (url) { this.url = url; this.close = () => {}; streams.push(this); };
+  });
+  /* Connected the way a stream connects: the listener hears the current
+     state at once, then every change. */
+  const connect = (es, subscribe) => subscribe((event) => es.onmessage({ data: JSON.stringify(event) }));
+  /* The page's own reload stream is open too; the room's is the other. */
+  const room = () => streams.find((es) => /\/stream(\?|$)/.test(es.url));
+  return { win, streams, posted, connect, room };
+}
+
+/* The pages as the server sends them, run in a window: the markup is
+   the real markup, so an id renamed in lib/pages.js and not in the
+   runtime fails here rather than in a room. */
+const bodyOf = (page) => page.match(/<body[^>]*>([\s\S]*)<\/body>/)[1].replace(/<script[\s\S]*?<\/script>/g, '');
+const pagesLib = require('./lib/pages.js');
+const roomDeck = (r, relay, opts) => roomWindow(bodyOf(pagesLib.deckPage(r)), [js, audienceJs], relay, opts);
+const roomPresenter = (r, relay, opts) =>
+  roomWindow(bodyOf(pagesLib.presenterPage(r, 9999)), [presenterJs, audienceJs], relay, opts);
+/* A deck window's stream connected as the server would connect it: as a
+   deck window, by the id in its address; a notes window's, by its deck's. */
+const asWindow = (relay, es) => (fn) => {
+  const q = new URL(es.url, 'http://x').searchParams;
+  return relay.onTally(fn, { deck: q.get('deck'), of: q.get('of') });
+};
+const roomPhone = (relay) => roomWindow(bodyOf(pagesLib.phonePage('Moves')), [phoneJs], relay);
+
+check('a deck opens the room with `audience:`, and nothing else is a value it takes', () => {
+  const body = '# G\n\n## 1.1\nid: 1-a\ntemplate: statement\n\nA.\n\n```notes\nn\n```\n';
+  eq(R(body).deck.audience, null, 'no key, no room');
+  eq(render(`name: T\naudience: local\n\n${body}`, TALK).deck.audience, 'local', 'a relay inside serve');
+  eq(render(`name: T\naudience: https://room.example/talks/\n\n${body}`, TALK).deck.audience,
+     'https://room.example/talks', 'a relay elsewhere, its trailing slash gone');
+  /* A value it does not know is a typo or a guess, and either would be a
+     room that never opens while the deck looks as though it asked. */
+  for (const bad of ['loud', 'http://room.example', 'ftp://room.example', '']) {
+    let msg = '';
+    try { render(`name: T\naudience: ${bad}\n\n${body}`, TALK); } catch (err) { msg = err.message; }
+    if (!msg.includes(`audience is ${bad || 'empty'}`) || !msg.includes('`local`')) {
+      throw new Error(`audience: ${bad} was not refused by name: ${msg || 'no error'}`);
+    }
+  }
+});
+
+check('a deck with no audience makes no audience request at all', () => {
+  /* Structural first: the script that would make one is not on the page. */
+  const { deckPage, presenterPage } = require('./lib/pages.js');
+  for (const page of [deckPage(MOVES_DECK), presenterPage(MOVES_DECK, 9999)]) {
+    if (/audience|qr\.js/.test(page)) throw new Error('a page with no room mentions the audience');
+  }
+  /* And behavioural: the fixture has run every check above this one, and
+     all it ever opened is the reload stream. */
+  eq(fixture.opened.join(' '), '/reload', 'streams the fixture opened');
+  eq(fixture.fetched.length, 0, 'requests the fixture made');
+});
+
+check('a deck in a room carries its relay and the script that talks to it; the others do not', () => {
+  const { deckPage, presenterPage, printPage } = require('./lib/pages.js');
+  for (const page of [deckPage(ROOM_DECK), presenterPage(ROOM_DECK, 9999)]) {
+    if (!page.includes('data-audience="local"')) throw new Error('a page does not say where its relay is');
+    if (!page.includes('<script src="/js/audience.js"></script>')) throw new Error('a page has no room script');
+  }
+  if (!presenterPage(ROOM_DECK, 9999).includes('data-room-phones')) throw new Error('the notes header has no room in it');
+  if (deckPage(ROOM_DECK).includes('id="audience"')) throw new Error('the room panel is on the deck');
+  /* On paper the deck is a photograph, and a photograph opens nothing. */
+  if (/<script|data-audience/.test(printPage(ROOM_DECK))) throw new Error('the print page reaches for the room');
+});
+
+check('the relay knows where the talk is, and tells a phone what is on the stage', () => {
+  const relay = createRelay({ deck: 'Moves', throttle: 0, join: () => 'http://10.0.0.2:10000/' });
+  const hello = relay.fromDeck({ type: 'hello', deck: 'sipario:moves', name: 'Moves', title: 'Moves, and a long subtitle' });
+  eq(hello.status, 200, 'hello is answered');
+  eq(hello.body.session, relay.session, 'with the session');
+  eq(hello.body.join, 'http://10.0.0.2:10000/', 'and where phones join');
+  eq(relay.stage().deck, 'Moves', "the phones are given the deck's name, not the tab's longer title");
+  if (!pagesLib.deckPage(ROOM_DECK).includes('data-name="Moves"')) throw new Error('the deck page does not carry its name for the hello');
+  eq(relay.fromDeck({ type: 'slide', id: '2-middle', step: 0 }).status, 200, 'a slide is taken');
+  eq(JSON.stringify(relay.state.slide), '{"id":"2-middle","step":0,"v":0}', 'and kept');
+
+  const tallies = [];
+  relay.onTally((t) => tallies.push(t));
+  const staged = [];
+  const off = relay.onStage((s) => staged.push(s));
+  eq(staged[0].mode, 'react', 'a phone joining is told what is on stage at once');
+  eq(tallies[tallies.length - 1].phones, 1, 'and the deck hears one phone has joined');
+  off();
+  eq(tallies[tallies.length - 1].phones, 0, 'and that it left');
+
+  for (const bad of [null, { type: 'dance' }, { type: 'slide', id: 3 }]) {
+    eq(relay.fromDeck(bad).status, 400, `the deck message ${JSON.stringify(bad)} is refused`);
+  }
+  eq(relay.fromPhone({ type: 'slide', id: 'x', step: 0 }).status, 400, 'a phone cannot say where the talk is');
+  relay.close();
+});
+
+check('a deck in a room says where it is as it moves, and only when it moves', () => {
+  const relay = createRelay({ deck: 'Moves', throttle: 0 });
+  const { win, streams, posted } = roomWindow(`${ROOM_MAIN}<div id="progress"><div id="progress-bar"></div></div>`,
+    [js, audienceJs], relay);
+  eq(posted[0].url, '/audience/deck', 'the local relay is on the deck\'s own origin');
+  eq(posted.map((p) => p.msg.type).join(' '), 'hello slide', 'hello, then where it is');
+  eq(relay.state.slide.id, '1-three-movements', 'the relay has the first slide');
+  win.document.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowRight' }));
+  eq(relay.state.slide.id, '2-middle', 'and follows the deck to the next movement');
+  const before = posted.length;
+  win.document.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowUp' }));   // nowhere to go
+  eq(posted.length, before, 'a key that moved nothing sends nothing');
+  eq(streams.map((s) => s.url.replace(/deck=[a-z0-9]+$/, 'deck=<window>')).join(' '), '/reload /audience/stream?deck=<window>',
+     'and it listens to the relay\'s tally, as a deck window, by its id');
+  eq(streams[1].url.endsWith('deck=' + win.document.getElementById('deck').getAttribute('data-window')), true, 'its own');
+  relay.close();
+});
+
+check('a relay that cannot be reached is said once, in the presenter window, and never on the stage', () => {
+  const relay = createRelay({ deck: 'Moves', throttle: 0 });
+  const deckRoom = roomDeck(ROOM_DECK, relay, { down: true });
+  const pres = roomPresenter(ROOM_DECK, relay, { down: true });
+  eq(pres.posted.length, 0, 'the presenter window never speaks for the deck');
+  const note = pres.win.document.querySelector('.notes-bar [data-room-alert]');
+  pres.room().onerror();
+  pres.room().onerror();
+  if (!/not answering/.test(note.textContent)) throw new Error(`the presenter says: "${note.textContent}"`);
+  eq(note.textContent.split('not answering').length - 1, 1, 'said once, however often it fails');
+  deckRoom.room().onerror();
+  if (/not answering/.test(deckRoom.win.document.body.textContent)) throw new Error('the stage was told');
+  /* And the deck still moves: the talk does not wait on the room. */
+  deckRoom.win.document.dispatchEvent(new deckRoom.win.KeyboardEvent('keydown', { key: 'ArrowRight' }));
+  eq(deckRoom.win.document.querySelector('.slide.current').id, '2-middle', 'the deck moved on');
+  pres.room().onopen();
+  eq(note.textContent, '', 'and the note goes when the relay answers');
+  relay.close();
+});
+
+check('an edit to the pages under lib/ reaches the next request, as an edit to the renderer does', () => {
+  /* The server held the page writers as the functions it first loaded, so
+     the require cache being dropped on a save changed nothing: the notes
+     went on being written by the old pages.js, beside new scripts and
+     sheets, until a restart. A copy of the library is served and its
+     pages.js edited, so this repo's own files are never touched. */
+  const root = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-reload-'));
+  for (const d of ['lib', 'js', 'css']) fs.cpSync(path.join(ROOT, d), path.join(root, d), { recursive: true });
+  const talkDir = path.join(root, 'talk');
+  fs.cpSync(TALK.dir, talkDir, { recursive: true });
+  const probe = `
+    const fs = require('fs');
+    const { serve } = require(${JSON.stringify(path.join(root, 'lib/server.js'))});
+    const quiet = { log(){}, warn(){}, error(){} };
+    const s = serve(${JSON.stringify(talkDir)}, { port: 0, log: quiet });
+    const up = (srv) => new Promise((ok) => srv.listening ? ok() : srv.once('listening', ok));
+    const page = async (port) => (await fetch('http://127.0.0.1:' + port + '/presenter')).text();
+    (async () => {
+      await up(s);
+      const port = s.address().port;
+      const out = { before: /RELOADED/.test(await page(port)) };
+      const file = ${JSON.stringify(path.join(root, 'lib/pages.js'))};
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('<title>Presenter', '<title>RELOADED Presenter'));
+      out.after = false;
+      for (let i = 0; i < 40 && !out.after; i++) {
+        await new Promise((ok) => setTimeout(ok, 100));
+        out.after = /RELOADED/.test(await page(port));
+      }
+      console.log(JSON.stringify(out));
+      s.close(); process.exit(0);
+    })();
+  `;
+  const { status, stdout, stderr } = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 25000 });
+  fs.rmSync(root, { recursive: true, force: true });
+  eq(status, 0, `the probe ran (${stderr.trim().split('\n')[0]})`);
+  const out = JSON.parse(stdout.trim().split('\n').pop());
+  eq(out.before, false, 'the notes page starts as written');
+  eq(out.after, true, 'and after pages.js is saved, the next request is written by the new one');
+});
+
+check('on the network a phone reaches the room and nothing else: not the deck, not the notes, not the talk', () => {
+  /* The listener split, checked from outside. The deck listens on this
+     machine alone and the phones get a listener of their own, which
+     answers the join page and the room's two routes and 404s the rest. */
+  const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-room-'));
+  fs.cpSync(TALK.dir, dir, { recursive: true });
+  const deckFile = path.join(dir, 'deck.md');
+  fs.writeFileSync(deckFile, inRoom(fs.readFileSync(deckFile, 'utf8')));
+  const probe = `
+    const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+    const http = require('http');
+    const quiet = { log(){}, warn(){}, error(){} };
+    const s = serve(${JSON.stringify(dir)}, { port: 0, log: quiet });
+    const up = (srv) => new Promise((ok) => srv.listening ? ok() : srv.once('listening', ok));
+    const first = (port, p) => new Promise((ok) => http.get({ host: '127.0.0.1', port, path: p }, (r) => {
+      r.once('data', (c) => { ok(JSON.parse(String(c).replace(/^data: /, ''))); r.destroy(); });
+    }));
+    const status = async (port, p, init) => (await fetch('http://127.0.0.1:' + port + p, init)).status;
+    const json = (body) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    (async () => {
+      await up(s); await up(s.room.server);
+      const deck = s.address().port, phone = s.room.port;
+      const out = {
+        deckHost: s.address().address,
+        phoneHost: s.room.server.address().address,
+        page: await status(phone, '/'),
+        script: await status(phone, '/phone.js'),
+        sheet: await status(phone, '/phone.css'),
+        refused: {},
+        hello: await (await fetch('http://127.0.0.1:' + deck + '/audience/deck', json({ type: 'hello', deck: 'x', title: 'Minimal' }))).json(),
+        plain: await status(deck, '/audience/deck', { method: 'POST', body: '{"type":"hello"}' }),
+        plainPhone: await status(phone, '/phone', { method: 'POST', body: '{"type":"react"}' }),
+        tally: await first(deck, '/audience/stream'),
+        stage: await first(phone, '/stream'),
+      };
+      for (const p of ['/presenter', '/print', '/js/deck.js', '/js/audience.js', '/js/presenter.js', '/reload',
+                       '/css/presenter.css', '/templates/title.html', '/templates/icon-list.js',
+                       '/audience/stream', '/audience/deck', '/deck.md', '/images/..%2fdeck.md',
+                       '/fonts/..%2fdeck.md', '/slide/1-a-slide-of-every-template/0', '/images/one-piece.svg']) {
+        out.refused[p] = await status(phone, p);
+      }
+      out.served = {};
+      for (const p of ['/css/theme.css', '/deck.css', '/templates/title.css', '/fonts/inter.woff2', '/images/bg-blob.svg']) {
+        out.served[p] = await status(phone, p);
+      }
+      out.front = /id="screen"/.test(await (await fetch('http://127.0.0.1:' + phone + '/')).text());
+      /* A phone loads each slide into a fresh frame; the fonts must not
+         travel again each time. */
+      const font = await fetch('http://127.0.0.1:' + phone + '/fonts/inter.woff2');
+      await font.arrayBuffer();
+      out.again = await status(phone, '/fonts/inter.woff2', { headers: { 'if-modified-since': font.headers.get('last-modified') } });
+      console.log(JSON.stringify(out));
+      s.close(); process.exit(0);
+    })();
+  `;
+  const { status, stdout, stderr } = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 25000 });
+  fs.rmSync(dir, { recursive: true, force: true });
+  eq(status, 0, `the probe ran (${stderr.trim().split('\n')[0]})`);
+  const out = JSON.parse(stdout.trim().split('\n').pop());
+  eq(out.deckHost, '127.0.0.1', 'with the room open, the deck listens on this machine alone');
+  eq(out.phoneHost, '0.0.0.0', 'and the phones get a listener on the network');
+  eq(out.page, 200, 'which serves the join page');
+  eq(out.script, 200, 'its script');
+  eq(out.sheet, 200, 'and its sheet');
+  for (const [p, code] of Object.entries(out.refused)) eq(code, 404, `a phone asking for ${p}`);
+  /* What a slide is drawn with, and nothing else of the talk. */
+  for (const [p, code] of Object.entries(out.served)) eq(code, 200, `a phone asking for ${p}`);
+  eq(out.front, true, "the phone listener's front page is the phone's, not the deck's");
+  eq(out.again, 304, 'and a font the phone already has is not sent again');
+  eq(out.hello.ok, true, 'the deck says hello on its own listener');
+  eq(out.plain, 415, 'a message that does not say it is JSON is refused, so no other site can send one');
+  eq(out.plainPhone, 415, 'on either listener');
+  eq(out.tally.type, 'tally', 'the deck hears the tally as it connects');
+  if (!/^http:\/\/[^/]+:\d+\/$/.test(out.tally.join)) throw new Error(`the join address is ${out.tally.join}`);
+  eq(out.stage.type, 'stage', 'and a phone hears the stage');
+  eq(out.stage.deck, 'Minimal', 'named for the talk');
+});
+
+check('the pace is read from the last minute, one voice per phone, and not at all from fewer than three', () => {
+  /* The contract of lib/pace.js, which is the one piece of this a talk's
+     owner may want to reshape. Whatever it becomes, these are the
+     promises the panel is drawn on. */
+  const { paceReading, DEFAULTS } = require('./lib/pace.js');
+  const at = 10 * 60 * 1000;
+  const sig = (token, value, ago = 0) => ({ token, value, at: at - ago });
+  eq(JSON.stringify(paceReading([], at)), '{"reading":null,"slower":0,"ok":0,"faster":0,"n":0}', 'nobody');
+  const two = paceReading([sig('a', -1), sig('b', -1)], at);
+  eq(two.reading, null, 'two phones are not a reading');
+  eq(two.slower, 2, 'though they are counted');
+  eq(paceReading([sig('a', -1), sig('b', -1), sig('c', -1)], at).reading, -1, 'all asking for slower is -1');
+  eq(paceReading([sig('a', 1), sig('b', 1), sig('c', 1)], at).reading, 1, 'all asking for faster is +1');
+  eq(paceReading([sig('a', 1), sig('b', 0), sig('c', -1), sig('d', 1)], at).reading, 0.25,
+     'and between, (faster - slower) over everyone who spoke');
+  const changed = paceReading([sig('a', -1, 30000), sig('a', 1, 10000), sig('b', 0), sig('c', 0)], at);
+  eq(changed.n, 3, 'a phone that changed its mind is one phone');
+  eq(`${changed.slower}/${changed.faster}`, '0/1', 'counted as what it said last');
+  eq(paceReading([sig('a', 1, 10000), sig('a', -1, 30000), sig('b', 0), sig('c', 0)], at).faster, 1,
+     'whatever order the signals come in');
+  const old = [sig('a', -1, DEFAULTS.window + 1), sig('b', 0), sig('c', 0), sig('d', 0)];
+  eq(paceReading(old, at).slower, 0, 'a signal older than the window counts for nothing');
+  eq(paceReading([sig('a', -1, DEFAULTS.window)], at).slower, 1, 'one at its edge still counts');
+  eq(paceReading([{ token: 'a', value: -1, at: at + 1 }], at).n, 0, 'nor does one from the future');
+  eq(paceReading([{ token: 'a', value: 2, at }, { token: 'b', value: '1', at }], at).n, 0,
+     'a value other than -1, 0 or 1 is not a signal');
+  eq(paceReading([sig('a', 1)], at, { minimum: 1 }).reading, 1, 'the floor is an option');
+  eq(paceReading([sig('a', 1, 5000)], at, { window: 1000 }).n, 0, 'and so is the window');
+  const input = [sig('a', 1), sig('a', -1, 1)];
+  const copy = JSON.stringify(input);
+  paceReading(input, at);
+  eq(JSON.stringify(input), copy, 'and it changes nothing it is handed');
+});
+
+check('a reaction is counted once, and a phone pressing too fast is told to wait', () => {
+  const { LIMITS } = require('./lib/relay.js');
+  let t = 0;
+  const relay = createRelay({ throttle: 0, tick: 0, now: () => t });
+  relay.fromDeck({ type: 'slide', id: '2-middle', step: 0 });
+  const react = (token, kind = 'clap') => relay.fromPhone({ type: 'react', token, kind }).status;
+  for (let i = 0; i < LIMITS.react.each; i++) eq(react('phone-aaaa'), 200, `reaction ${i + 1}`);
+  eq(react('phone-aaaa'), 429, `reaction ${LIMITS.react.each + 1} inside the window waits`);
+  eq(react('phone-bbbb'), 200, 'another phone does not');
+  t = LIMITS.react.per;
+  eq(react('phone-aaaa'), 200, 'and the first may go again once the window has passed');
+  const clap = relay.tally().reactions.find((r) => r.kind === 'clap');
+  eq(clap.count, LIMITS.react.each + 2, 'the tally counts what was taken, and nothing refused');
+  if (!clap.emoji) throw new Error('the tally does not say how to draw a reaction');
+  eq(relay.slides.get('2-middle').reactions.clap, LIMITS.react.each + 2, 'and so does the slide it landed on');
+  eq(react('phone-aaaa', 'boo'), 400, 'a reaction outside the set is refused');
+  eq(react('short'), 400, 'and so is a token that is not one');
+  eq(relay.tally().joined, 2, 'two phones have spoken');
+  relay.close();
+});
+
+check('the room as a whole has a ceiling, however many tokens one phone makes', () => {
+  /* A token is made by the phone, so a phone that wanted to could make a
+     new one for every press. The room's ceiling is what bounds that. */
+  const { LIMITS } = require('./lib/relay.js');
+  const relay = createRelay({ throttle: 0, tick: 0, now: () => 0 });
+  for (let i = 0; i < LIMITS.react.room; i++) {
+    const s = relay.fromPhone({ type: 'react', token: `token-${String(i).padStart(4, '0')}`, kind: 'wow' }).status;
+    if (s !== 200) throw new Error(`reaction ${i + 1} was refused before the ceiling`);
+  }
+  eq(relay.fromPhone({ type: 'react', token: 'token-fresh', kind: 'wow' }).status, 429, 'past the ceiling, a new token waits too');
+  relay.close();
+});
+
+check("a phone's pace is its latest word, and the deck is told the room's", () => {
+  let t = 0;
+  const relay = createRelay({ throttle: 0, tick: 0, now: () => t });
+  relay.fromDeck({ type: 'slide', id: '2-rows', step: 1 });
+  const pace = (token, value) => relay.fromPhone({ type: 'pace', token, value }).status;
+  eq(pace('phone-aaaa', -1), 200, 'a phone asks for slower');
+  eq(pace('phone-aaaa', 1), 429, 'and cannot say it again at once');
+  eq(pace('phone-bbbb', -1), 200, 'a second agrees');
+  eq(pace('phone-cccc', 1), 200, 'a third wants faster');
+  t = 2000;
+  eq(pace('phone-aaaa', 1), 200, 'the first changes its mind');
+  const p = relay.tally().pace;
+  eq(`${p.slower} ${p.ok} ${p.faster}`, '1 0 2', 'the room, one voice a phone');
+  eq(Math.round(p.reading * 1000), 333, 'reads a third of the way to faster');
+  eq(relay.fromPhone({ type: 'pace', token: 'phone-dddd', value: 5 }).status, 400, 'a pace that is not -1, 0 or 1 is refused');
+  eq(JSON.stringify(relay.slides.get('2-rows').pace), '{"slower":2,"ok":0,"faster":2}',
+     'and the slide keeps every word it heard');
+  relay.close();
+});
+
+check('the presenter window shows the reactions and the pace; the stage, by default, neither', () => {
+  const relay = createRelay({ deck: 'Moves', throttle: 0, tick: 0, join: () => 'http://10.0.0.2:10000/' });
+  const deckRoom = roomDeck(ROOM_DECK, relay);
+  const pres = roomPresenter(ROOM_DECK, relay);
+  deckRoom.connect(deckRoom.room(), relay.onTally);
+  pres.connect(pres.room(), relay.onTally);
+  const doc = pres.win.document;
+  eq(doc.getElementById('audience'), null, 'the notes carry no room section: the header says it all');
+  for (const [tok, v] of [['phone-aaaa', -1], ['phone-bbbb', -1], ['phone-cccc', -1], ['phone-dddd', 1]]) {
+    relay.fromPhone({ type: 'pace', token: tok, value: v });
+  }
+  relay.fromPhone({ type: 'react', token: 'phone-aaaa', kind: 'clap' });
+  relay.fromPhone({ type: 'react', token: 'phone-bbbb', kind: 'clap' });
+  const bar = doc.querySelector('.notes-bar [data-room-reactions]');
+  if (!bar || !/\u{1F44F}.2/u.test(bar.textContent)) {
+    throw new Error(`the notes' header does not count the claps: ${bar && bar.textContent}`);
+  }
+  eq(doc.getElementById('room-reactions'), null, 'and the body no longer carries a line of them');
+  /* Docked, the header is the deck page's own bar: built on N, and filled
+     from the count already in hand rather than the next one. */
+  const dd = deckRoom.win.document;
+  dd.dispatchEvent(new deckRoom.win.KeyboardEvent('keydown', { key: 'n' }));
+  const dockBar = dd.querySelector('#dock-bar [data-room-reactions]');
+  if (!dockBar || !/\u{1F44F}.2/u.test(dockBar.textContent)) {
+    throw new Error(`the dock's header does not count the claps: ${dockBar && dockBar.textContent}`);
+  }
+  const pace = doc.querySelector('.notes-bar [data-room-pace]');
+  if (!pace || !/3 slower/.test(pace.textContent)) throw new Error('the counts are not said in the header');
+  if (!/^\d+ phones?$/.test(doc.querySelector('.notes-bar [data-room-phones]').textContent)) {
+    throw new Error(`the header does not count the phones: ${doc.querySelector('.notes-bar [data-room-phones]').textContent}`);
+  }
+  const order = [...doc.querySelectorAll('.notes-bar [data-room-phones], .notes-bar [data-room-reactions], .notes-bar [data-room-pace]')]
+    .map((el) => Object.keys(el.dataset)[0]);
+  eq(order.join(' '), 'roomPhones roomReactions roomPace', 'phones, then reactions, then the pace');
+  eq(deckRoom.win.document.getElementById('reactions'), null, 'nothing floats on the stage');
+  relay.close();
+});
+
+check('asked to, the stage floats what the room reacts with', () => {
+  const r = render(inRoom(MOVES_SRC).replace('audience: local', 'audience: local\naudience-reactions: stage'), TALK);
+  eq(r.deck.reactionsOnStage, true, 'the deck asked');
+  const relay = createRelay({ deck: 'Moves', throttle: 0, tick: 0 });
+  const deckRoom = roomDeck(r, relay);
+  deckRoom.connect(deckRoom.room(), relay.onTally);
+  for (const tok of ['phone-aaaa', 'phone-bbbb', 'phone-cccc']) relay.fromPhone({ type: 'react', token: tok, kind: 'love' });
+  eq(deckRoom.win.document.querySelectorAll('#reactions .reaction').length, 3, 'one rises per reaction');
+  for (let i = 0; i < 5; i++) relay.fromPhone({ type: 'react', token: 'phone-dddd', kind: 'wow' });
+  const floating = deckRoom.win.document.querySelectorAll('#reactions .reaction').length;
+  if (floating > 3 + 5) throw new Error(`${floating} reactions rose from eight`);
+  relay.close();
+});
+
+check('audience-reactions takes `stage` alone, and only in a deck with a room', () => {
+  const body = '# G\n\n## 1.1\nid: 1-a\ntemplate: statement\n\nA.\n\n```notes\nn\n```\n';
+  for (const [head, want] of [['audience-reactions: stage', 'needs `audience:`'],
+                              ['audience: local\naudience-reactions: screen', 'audience-reactions is screen']]) {
+    let msg = '';
+    try { render(`name: T\n${head}\n\n${body}`, TALK); } catch (err) { msg = err.message; }
+    if (!msg.includes(want)) throw new Error(`"${head}" was not refused by name: ${msg || 'no error'}`);
+  }
+});
+
+check('a phone in the room reacts and signals the pace, with a token it made and kept', () => {
+  const relay = createRelay({ deck: 'Moves', throttle: 0, tick: 0 });
+  const phone = roomPhone(relay);
+  phone.connect(phone.room(), relay.onStage);
+  const doc = phone.win.document;
+  eq(doc.querySelectorAll('.reactions button').length, 5, 'a button per reaction');
+  eq(doc.querySelectorAll('.pace button').length, 3, 'and three for the pace');
+  doc.querySelector('.reactions button').click();
+  doc.querySelectorAll('.pace button')[0].click();
+  eq(phone.posted.map((p) => `${p.url} ${p.msg.type}`).join(', '), '/phone react, /phone pace', 'both sent');
+  const tok = phone.posted[0].msg.token;
+  if (!/^[0-9a-f]{24}$/.test(tok)) throw new Error(`the token is ${tok}`);
+  eq(phone.posted[1].msg.token, tok, 'the same token both times');
+  eq(phone.win.localStorage.getItem('sipario-token'), tok, 'kept in the phone');
+  eq(relay.tally().reactions[0].count, 1, 'and the relay counted it');
+  relay.close();
+});
+
+/* A deck with a room, and one poll slide under test. `tpl` and the poll's
+   lines are what each refusal below varies. */
+const pollDeck = (poll, { tpl = 'poll', head = 'audience: local\n', more = '' } = {}) =>
+  `name: T\n${head}\n# G\n\n## 1.1 Asked\nid: 1-asked\ntemplate: ${tpl}\n\n` +
+  `\`\`\`poll\n${poll}\n\`\`\`\n\n\`\`\`notes\nn\n\`\`\`\n${more}`;
+const GOOD_POLL = 'id: which\nquestion: Which one?\n- This\n- That';
+
+check('a poll the room could not answer stops the render, and each reason is named', () => {
+  const refused = (src, want, opts = TALK) => {
+    let msg = '';
+    try { render(src, opts); } catch (err) { msg = err.message; }
+    if (!msg.includes(want)) throw new Error(`expected "${want}", got: ${msg || 'no error'}`);
+  };
+  refused(pollDeck(GOOD_POLL, { head: '' }), 'a poll, in a deck with no `audience:`');
+  refused(pollDeck(GOOD_POLL, { tpl: 'statement' }), 'the statement template never prints a poll');
+  refused(pollDeck('id: which\nquestion: Which one?\n- Only this'), 'the poll has 1 option; it needs two at least');
+  refused(pollDeck('id: which\nquestion: Which one?'), 'the poll has 0 options');
+  refused(pollDeck('question: Which one?\n- This\n- That'), 'the poll declares no `id:`');
+  refused(pollDeck('id: Which One\nquestion: Which one?\n- This\n- That'), 'is not lowercase letters, digits and hyphens');
+  refused(pollDeck('id: which\n- This\n- That'), 'the poll asks no `question:`');
+  refused(pollDeck(`${GOOD_POLL}\nanswer: This`), '"answer: This" is not `id:`, `question:` or a `- ` option');
+  refused(pollDeck(GOOD_POLL, { more: `\n## 1.2 Again\nid: 1-again\ntemplate: poll\n\n\`\`\`poll\n${GOOD_POLL}\n\`\`\`\n\n\`\`\`notes\nn\n\`\`\`\n` }),
+          'poll id "which" is already 1-asked\'s');
+  refused(pollDeck(GOOD_POLL, { more: `\n--\n\n\`\`\`poll\nid: other\nquestion: And?\n- A\n- B\n\`\`\`\n\n\`\`\`notes\nn\n\`\`\`\n` }),
+          '1-asked: 2 polls; a slide holds one');
+  refused('name: T\naudience: local\n\n# G\n\n## 1.1 Asked\nid: 1-asked\ntemplate: poll\n\n```poll\nid: x\n',
+          'a ```poll block is never closed');
+  /* A template may print the poll and still give the room's answers
+     nowhere to land. That is refused too, rather than drawing bars that
+     never move. */
+  const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-unmarked-'));
+  fs.writeFileSync(path.join(dir, 'bare.html'),
+    '<p class="bare-q">{{poll.question}}</p>\n\n<ul>{{#poll.options}}<li>{{text}}</li>{{/poll.options}}</ul>\n');
+  refused(pollDeck(GOOD_POLL, { tpl: 'bare' }), 'the bare template marks no element data-option="0"',
+          { templateRoot: dir, imageRoot: TALK.imageRoot });
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+check('a poll reaches its template whole, and stays on the stage for the rest of its slide', () => {
+  const r = render(pollDeck(GOOD_POLL, { more: '\n--\n\n```notes\nm\n```\n' }), TALK);
+  const steps = [...r.html.matchAll(/<section class="slide[^"]*" id="([^"]+)"[^>]*?(?: data-poll="([^"]*)")?>([\s\S]*?)<aside/g)];
+  eq(steps.length, 2, 'two steps');
+  for (const [, id, poll, body] of steps) {
+    if (!poll) throw new Error(`${id} does not carry the poll`);
+    const data = JSON.parse(poll.replace(/&quot;/g, '"'));
+    eq(JSON.stringify(data), '{"id":"which","question":"Which one?","options":["This","That"]}', `${id}: the poll, whole`);
+    eq((body.match(/data-option="\d"/g) || []).join(' '), 'data-option="0" data-option="1"', `${id}: each option marked`);
+    if (/```|id: which/.test(body)) throw new Error(`${id}: the poll block reached the stage as text`);
+  }
+});
+
+check('on paper a poll prints its question and its options, and no answers', () => {
+  const { printPage } = require('./lib/pages.js');
+  const page = printPage(render(fs.readFileSync(TALK.deck, 'utf8'), TALK));
+  const poll = page.match(/<section class="slide template-poll[\s\S]*?<\/section>/);
+  if (!poll) throw new Error('the example has no poll to print');
+  if (!/class="poll-question">[^<]+</.test(poll[0])) throw new Error('the question is not printed');
+  if ((poll[0].match(/class="poll-option"/g) || []).length < 2) throw new Error('the options are not printed');
+  if (/data-votes|--share|<script/.test(poll[0])) throw new Error('the printed poll carries answers or a script');
+});
+
+check('one vote a phone, the last one standing, and only while its poll is on the stage', () => {
+  const relay = createRelay({ throttle: 0, tick: 0 });
+  const open = { type: 'poll-open', id: 'which', question: 'Which one?', options: ['This', 'That', 'Other'] };
+  const vote = (token, option, poll = 'which') => relay.fromPhone({ type: 'vote', token, poll, option }).status;
+  eq(vote('phone-aaaa', 0), 409, 'nothing is open yet');
+  eq(relay.fromDeck(open).status, 200, 'the deck opens the poll');
+  eq(relay.stage().mode, 'poll', 'and the phones are shown it');
+  eq(vote('phone-aaaa', 0), 200, 'a phone votes');
+  eq(vote('phone-aaaa', 2), 200, 'and changes its mind');
+  eq(vote('phone-bbbb', 2), 200, 'another agrees with its second thought');
+  eq(vote('phone-cccc', 3), 400, 'an option that is not there is refused');
+  eq(vote('phone-cccc', 0, 'other'), 409, 'and so is a poll that is not on the stage');
+  eq(JSON.stringify(relay.tally().polls.which), '{"votes":[0,0,2],"total":2}', 'two phones, two votes, both on Other');
+  relay.fromDeck({ type: 'poll-close', id: 'which' });
+  eq(relay.stage().mode, 'react', 'closed, the phones go back to reacting');
+  eq(vote('phone-dddd', 1), 409, 'and a late vote is refused');
+  relay.fromDeck(open);
+  eq(relay.tally().polls.which.total, 2, 'opened again, the answers are still there');
+  relay.fromDeck({ ...open, options: ['This', 'That'] });
+  eq(relay.tally().polls.which.total, 0, 'but new options are a new question, and start again');
+  relay.fromDeck({ type: 'poll-close' });
+  eq(relay.tally().poll, null, 'a close that names nothing closes what is open');
+  eq(relay.fromDeck({ ...open, options: ['Only'] }).status, 400, 'a poll of one option is refused here too');
+  relay.close();
+});
+
+check('the room answers a poll on its phones, and the deck draws the answers where the template marked them', () => {
+  const relay = createRelay({ deck: 'T', throttle: 0, tick: 0, join: () => 'http://10.0.0.2:10000/' });
+  const deckRoom = roomDeck(render(pollDeck(GOOD_POLL), TALK), relay);
+  eq(deckRoom.posted.map((p) => p.msg.type).join(' '), 'hello slide', 'the deck says where it is');
+  eq(relay.tally().poll, 'which', 'and the relay, knowing where the poll sits, opens it');
+  deckRoom.connect(deckRoom.room(), relay.onTally);
+  const phone = roomPhone(relay);
+  phone.connect(phone.room(), relay.onStage);
+  const pdoc = phone.win.document;
+  eq(pdoc.querySelector('.question').textContent, 'Which one?', 'the phone shows the question');
+  const buttons = pdoc.querySelectorAll('.options button');
+  eq(buttons.length, 2, 'and an answer per option');
+  buttons[1].click();
+  const sent = phone.posted[phone.posted.length - 1].msg;
+  eq(`${sent.type} ${sent.poll} ${sent.option}`, 'vote which 1', 'a tap is a vote for that option');
+  relay.fromPhone({ type: 'vote', token: 'phone-bbbb', poll: 'which', option: 1 });
+  relay.fromPhone({ type: 'vote', token: 'phone-cccc', poll: 'which', option: 0 });
+  relay.fromPhone({ type: 'vote', token: 'phone-dddd', poll: 'which', option: 1 });
+  const opts = deckRoom.win.document.querySelectorAll('.slide.current [data-option]');
+  eq([...opts].map((o) => o.getAttribute('data-votes')).join(' '), '1 3', 'each option carries its votes');
+  eq([...opts].map((o) => o.style.getPropertyValue('--share')).join(' '), '0.25 0.75', 'and its share');
+  eq(deckRoom.win.document.querySelector('[data-join]').textContent, '10.0.0.2:10000', 'the join address is filled in');
+  relay.close();
+});
+
+check('the presenter window counts the answers, and its previews show them', () => {
+  const relay = createRelay({ deck: 'T', throttle: 0, tick: 0 });
+  const r = render(pollDeck(GOOD_POLL), TALK);
+  const pres = roomPresenter(r, relay);
+  pres.connect(pres.room(), relay.onTally);
+  relay.fromDeck({ type: 'poll-open', id: 'which', question: 'Which one?', options: ['This', 'That'] });
+  relay.fromPhone({ type: 'vote', token: 'phone-aaaa', poll: 'which', option: 0 });
+  eq(pres.win.document.querySelector('.notes-bar [data-room-alert]').textContent, 'poll which: 1 answer', 'the panel counts');
+  eq(pres.win.document.querySelector('#deck [data-option="0"]').getAttribute('data-votes'), '1',
+     'and the copy the previews are cloned from has the answers');
+  relay.close();
+});
+
+const FORM = '```feedback\n- rate: How useful?\n- ask: What would you change?\n```\n';
+const formDeck = (form = FORM, head = 'audience: local\n', more = '') =>
+  `name: T\n${head}\n# G\n\n## 1.1 End\nid: 1-end\ntemplate: statement\n\nThanks.\n\n${form}\n\`\`\`notes\nn\n\`\`\`\n${more}`;
+
+check('a feedback form the room could not fill in stops the render, and each reason is named', () => {
+  const refused = (src, want) => {
+    let msg = '';
+    try { render(src, TALK); } catch (err) { msg = err.message; }
+    if (!msg.includes(want)) throw new Error(`expected "${want}", got: ${msg || 'no error'}`);
+  };
+  refused(formDeck(FORM, ''), 'a feedback form, in a deck with no `audience:`');
+  refused(formDeck('```feedback\n- score: How useful?\n```\n'), '"score:" is not a kind of question; it is rate or ask');
+  refused(formDeck('```feedback\nHow useful?\n```\n'), '"How useful?" is not a `- rate:` or `- ask:` question');
+  refused(formDeck('```feedback\n```\n'), 'the form asks nothing');
+  refused(formDeck(FORM, 'audience: local\n', `\n## 1.2 Again\nid: 1-again\ntemplate: statement\n\nAgain.\n\n${FORM}\n\`\`\`notes\nn\n\`\`\`\n`),
+          '2 feedback forms, at 1-end and 1-again; a deck has one');
+  refused('name: T\naudience: local\n\n# G\n\n## 1.1 End\nid: 1-end\ntemplate: statement\n\nThanks.\n\n' +
+          '```feedback\n- rate: How useful?\n', 'a ```feedback block is never closed');
+  const r = render(formDeck(), TALK);
+  const step = r.html.match(/<section[^>]* data-feedback="([^"]*)"[^>]*>([\s\S]*?)<aside/);
+  if (!step) throw new Error('the step does not carry its form');
+  eq(step[1].replace(/&quot;/g, '"'), '{"questions":[{"kind":"rate","text":"How useful?"},{"kind":"ask","text":"What would you change?"}]}',
+     'the form, whole, on its step');
+  if (/How useful/.test(step[2])) throw new Error('the form reached the stage as text');
+});
+
+check('the form stays open once reached, a poll goes before it, and a phone sends it whole', () => {
+  const relay = createRelay({ throttle: 0, tick: 0 });
+  const QS = [{ kind: 'rate', text: 'How useful?' }, { kind: 'ask', text: 'What would you change?' }];
+  const send = (token, answers) => relay.fromPhone({ type: 'feedback', token, answers }).status;
+  eq(send('phone-aaaa', [5, null]), 409, 'not before the deck reaches it');
+  relay.fromDeck({ type: 'feedback-open', questions: QS });
+  eq(relay.stage().mode, 'feedback', 'the phones show the form');
+  relay.fromDeck({ type: 'poll-open', id: 'late', question: 'One more?', options: ['Yes', 'No'] });
+  eq(relay.stage().mode, 'poll', 'a poll on the stage goes first');
+  relay.fromDeck({ type: 'poll-close', id: 'late' });
+  eq(relay.stage().mode, 'feedback', 'and the form comes back after it');
+  eq(send('phone-aaaa', [6, null]), 400, 'a score is 1 to 5');
+  eq(send('phone-aaaa', [3, 'x'.repeat(501)]), 400, 'an answer has a length');
+  eq(send('phone-aaaa', [3]), 400, 'a form is answered whole');
+  eq(send('phone-aaaa', [null, '  ']), 400, 'and not empty');
+  eq(send('phone-aaaa', [2, 'Slower, please']), 200, 'a phone sends its form');
+  eq(send('phone-aaaa', [4, 'More demos']), 200, 'and sends it again, changed');
+  eq(send('phone-bbbb', [5, null]), 200, 'a second phone rates without writing');
+  eq(relay.tally().feedback, 2, 'two forms, the second of the first phone replacing its first');
+  if (/demos|Slower/.test(JSON.stringify(relay.tally()))) throw new Error('what somebody typed reached the deck');
+  eq(JSON.stringify(relay.record().feedback.responses), '[[4,"More demos"],[5,null]]', 'the record keeps the answers');
+  relay.close();
+});
+
+check('a session goes to disk once a phone has spoken, as counts and no token', () => {
+  const saved = [];
+  let t = Date.parse('2026-09-27T10:00:00Z');
+  const relay = createRelay({ deck: 'T', throttle: 0, tick: 0, every: 0, now: () => t, save: (r) => saved.push(r) });
+  relay.fromDeck({ type: 'slide', id: '1-asked', step: 0 });
+  relay.fromDeck({ type: 'poll-open', id: 'which', question: 'Which one?', options: ['This', 'That'] });
+  relay.close();
+  eq(saved.length, 0, 'a session nobody joined leaves nothing behind');
+
+  const relay2 = createRelay({ deck: 'T', throttle: 0, tick: 0, every: 60000, now: () => t, save: (r) => saved.push(r) });
+  relay2.fromDeck({ type: 'slide', id: '1-asked', step: 0 });
+  relay2.fromDeck({ type: 'poll-open', id: 'which', question: 'Which one?', options: ['This', 'That'] });
+  relay2.fromPhone({ type: 'vote', token: 'secret-token-1', poll: 'which', option: 1 });
+  relay2.fromPhone({ type: 'react', token: 'secret-token-2', kind: 'clap' });
+  relay2.fromPhone({ type: 'pace', token: 'secret-token-2', value: 1 });
+  eq(saved.length, 0, 'writes wait and gather');
+  t += 1000;
+  relay2.close();
+  eq(saved.length, 1, 'and closing writes what was waiting');
+  const rec = saved[0];
+  eq(rec.session, relay2.session, 'named for its session');
+  eq(rec.joined, 2, 'two phones');
+  eq(JSON.stringify(rec.polls), '[{"id":"which","question":"Which one?","total":1,"options":[{"text":"This","votes":0},{"text":"That","votes":1}]}]', 'the poll, counted');
+  eq(rec.reactions.clap, 1, 'the reactions');
+  eq(JSON.stringify(rec.slides[0]), '{"id":"1-asked","reactions":{"clap":1,"love":0,"laugh":0,"wow":0,"think":0},"pace":{"slower":0,"ok":0,"faster":1}}',
+     'and what was said while each slide was up');
+  if (/secret-token/.test(JSON.stringify(rec))) throw new Error('a token reached the record');
+});
+
+check('results come out as JSON and a long CSV, beside the command and never in the talk', () => {
+  const { saveSession, listSessions, toCsv, exportResults, dataDir } = require('./lib/results.js');
+  eq(dataDir({ SIPARIO_DATA: '/x/y' }), '/x/y', 'the data folder can be named');
+  eq(dataDir({}, 'darwin', '/Users/a'), '/Users/a/Library/Application Support/sipario', 'on a Mac');
+  eq(dataDir({}, 'linux', '/home/a'), '/home/a/.local/share/sipario', 'elsewhere');
+  const root = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-results-'));
+  const out = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-out-'));
+  const rec = (session) => ({
+    deck: 'Minimal', session, started: '', updated: '', joined: 3,
+    polls: [{ id: 'which', question: 'Which, then?', total: 3, options: [{ text: 'This', votes: 2 }, { text: 'That', votes: 1 }] }],
+    reactions: { clap: 4, love: 0 },
+    slides: [{ id: '3-poll', reactions: { clap: 4, love: 0 }, pace: { slower: 1, ok: 0, faster: 0 } }],
+    feedback: { questions: [{ kind: 'rate', text: 'Useful?' }, { kind: 'ask', text: 'Change?' }],
+                responses: [[5, '=SUM(A1) "quoted", yes'], [4, null]] },
+  });
+  saveSession('sipario:minimal', rec('20260927-0900-aaaa'), root);
+  saveSession('sipario:minimal', rec('20260927-1400-bbbb'), root);
+  eq(listSessions('sipario:minimal', root).join(' '), '20260927-0900-aaaa 20260927-1400-bbbb', 'oldest first');
+  const r = exportResults(TALK.dir, { into: out, root });
+  eq(path.basename(r.json), 'minimal-20260927-1400-bbbb.json', 'the latest, named for the talk and the session');
+  eq(fs.readdirSync(out).sort().join(' '), 'minimal-20260927-1400-bbbb.csv minimal-20260927-1400-bbbb.json', 'both, where asked');
+  eq(JSON.parse(fs.readFileSync(r.json, 'utf8')).polls[0].options[0].votes, 2, 'the JSON is the record');
+  const csv = fs.readFileSync(r.csv, 'utf8').trim().split('\n');
+  eq(csv[0], 'kind,id,question,answer,count', 'a header');
+  for (const row of ['poll,which,"Which, then?",This,2', 'reaction,,,clap,4', 'slide-reaction,3-poll,,clap,4',
+                     'slide-pace,3-poll,,slower,1', 'rating,q1,Useful?,5,1', 'rating,q1,Useful?,3,0',
+                     `answer,q2,Change?,"'=SUM(A1) ""quoted"", yes",1`]) {
+    if (!csv.includes(row)) throw new Error(`no row ${row} in:\n${csv.join('\n')}`);
+  }
+  if (csv.some((l) => /^reaction,,,love/.test(l)) === false) throw new Error('a reaction nobody sent is still a row, at 0');
+  if (csv.some((l) => /slide-reaction,3-poll,,love/.test(l))) throw new Error('a slide lists a reaction it never had');
+  eq(path.basename(exportResults(TALK.dir, { into: out, root, session: '20260927-0900-aaaa' }).json),
+     'minimal-20260927-0900-aaaa.json', 'an earlier session by name');
+  let msg = '';
+  try { exportResults(TALK.dir, { into: out, root, session: 'nope' }); } catch (err) { msg = err.message; }
+  if (!/no session nope.*20260927-0900-aaaa/.test(msg)) throw new Error(`a wrong session is not named back: ${msg}`);
+  msg = '';
+  try { exportResults(path.join(ROOT, 'starters/stylish'), { into: out, root }); } catch (err) { msg = err.message; }
+  if (!/no sessions of "Stylish"/.test(msg)) throw new Error(`a talk with none says so: ${msg}`);
+  eq(toCsv({ polls: [], reactions: {}, slides: [], feedback: null }), 'kind,id,question,answer,count\n', 'an empty session is a header');
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(out, { recursive: true, force: true });
+});
+
+check('a phone fills in the form and sends it whole, and the answers come out of `sipario results`', () => {
+  /* In a window first: the form the phone shows. */
+  const relay = createRelay({ deck: 'T', throttle: 0, tick: 0 });
+  relay.fromDeck({ type: 'feedback-open', questions: [{ kind: 'rate', text: 'Useful?' }, { kind: 'ask', text: 'Change?' }] });
+  const phone = roomPhone(relay);
+  phone.connect(phone.room(), relay.onStage);
+  const doc = phone.win.document;
+  eq(doc.querySelectorAll('.scale button').length, 5, 'a score of 1 to 5');
+  doc.querySelectorAll('.scale button')[3].click();
+  const area = doc.querySelector('textarea');
+  area.value = 'More demos';
+  area.dispatchEvent(new phone.win.Event('input'));
+  doc.querySelector('form').dispatchEvent(new phone.win.Event('submit', { cancelable: true }));
+  eq(JSON.stringify(phone.posted[phone.posted.length - 1].msg.answers), '[4,"More demos"]', 'sent whole');
+  relay.close();
+
+  /* Then over the network and out the other end: a room served, a vote
+     and a form sent to it as a phone would, and the CLI reading it back. */
+  const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-results-talk-'));
+  fs.cpSync(TALK.dir, dir, { recursive: true });
+  const probe = `
+    const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+    const quiet = { log(){}, warn(){}, error(){} };
+    const s = serve(${JSON.stringify(dir)}, { port: 0, log: quiet });
+    const up = (srv) => new Promise((ok) => srv.listening ? ok() : srv.once('listening', ok));
+    const post = (port, p, body) => fetch('http://127.0.0.1:' + port + p,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.status);
+    (async () => {
+      await up(s); await up(s.room.server);
+      const deck = s.address().port, phone = s.room.port;
+      const said = [
+        await post(deck, '/audience/deck', { type: 'poll-open', id: 'how-you-present', question: 'Q?', options: ['A', 'B'] }),
+        await post(phone, '/phone', { type: 'vote', token: 'phone-aaaa', poll: 'how-you-present', option: 1 }),
+        await post(deck, '/audience/deck', { type: 'poll-close', id: 'how-you-present' }),
+        await post(deck, '/audience/deck', { type: 'feedback-open', questions: [{ kind: 'rate', text: 'Useful?' }] }),
+        await post(phone, '/phone', { type: 'feedback', token: 'phone-aaaa', answers: [5] }),
+      ];
+      s.room.relay.close();                   // what Ctrl-C does
+      console.log(JSON.stringify(said));
+      process.exit(0);
+    })();
+  `;
+  const run = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 25000 });
+  eq(run.status, 0, `the probe ran (${run.stderr.trim().split('\n')[0]})`);
+  eq(run.stdout.trim().split('\n').pop(), '[200,200,200,200,200]', 'every message was taken');
+  const cwd = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-results-cwd-'));
+  const cli = require('child_process').spawnSync('node', [path.join(ROOT, 'bin/sipario.js'), 'results', dir],
+    { encoding: 'utf8', cwd });
+  eq(cli.status, 0, `results ran (${cli.stderr.trim()})`);
+  if (!/^\[results\] minimal-\S+\.json, minimal-\S+\.csv: 1 phone, 1 poll, 0 reactions, 1 feedback form$/m.test(cli.stdout)) {
+    throw new Error(`it said: ${cli.stdout}`);
+  }
+  const csv = fs.readFileSync(path.join(cwd, fs.readdirSync(cwd).find((f) => f.endsWith('.csv'))), 'utf8');
+  if (!csv.includes('poll,how-you-present,Q?,B,1') || !csv.includes('rating,q1,Useful?,5,1')) {
+    throw new Error(`the CSV does not carry the vote and the score:\n${csv}`);
+  }
+  eq(fs.readdirSync(dir).some((f) => /\.(csv|json)$/.test(f)), false, 'and nothing was written into the talk');
+  for (const d of [dir, cwd]) fs.rmSync(d, { recursive: true, force: true });
+});
+
+// ------------------------------------------------ the script, off the network
+
+/* The presenter window, the print page and the notes inside the deck page
+   are served to this machine and nobody else. Whether a request is from
+   this machine is read off its socket, so it is checked two ways: the
+   rule on its own, and a served talk asked for its pages over this
+   machine's own network address, which reaches the server as another
+   machine would. */
+
+check('the script is for requests from this machine alone, read off the socket and not a header', () => {
+  const { fromThisMachine } = require('./lib/server.js');
+  const req = (remoteAddress, headers = {}) => ({ socket: { remoteAddress }, headers });
+  for (const a of ['127.0.0.1', '127.8.9.10', '::1', '::ffff:127.0.0.1']) eq(fromThisMachine(req(a)), true, a);
+  for (const a of ['192.168.1.7', '::ffff:192.168.1.7', '10.0.0.2', 'fe80::1', '::', '', undefined]) {
+    eq(fromThisMachine(req(a)), false, String(a));
+  }
+  for (const h of ['x-forwarded-for', 'forwarded', 'x-real-ip', 'cf-connecting-ip']) {
+    eq(fromThisMachine(req('127.0.0.1', { [h]: '203.0.113.9' })), false, `loopback carrying ${h}, as a tunnel would`);
+  }
+});
+
+check('a deck opened from another machine carries no notes, and N and D open nothing there', () => {
+  const { deckPage } = require('./lib/pages.js');
+  const page = deckPage(MOVES_DECK, { notes: false });
+  if (!page.includes('data-notes="off"')) throw new Error('the page does not say it has no notes');
+  if (/The first movement holds one slide/.test(page)) throw new Error('a script reached the page');
+  eq((page.match(/<aside class="notes"><\/aside>/g) || []).length, MOVES_DECK.steps, 'every step, its notes emptied');
+  let opened = 0;
+  const win = windowFor(bodyOf(page), [js], makeBus(), 'http://192.168.1.7:9999/',
+    (w) => { w.open = () => { opened++; return null; }; });
+  const key = (k) => win.document.dispatchEvent(new win.KeyboardEvent('keydown', { key: k }));
+  key('n');
+  eq(win.document.getElementById('dock'), null, 'N frames no notes window');
+  eq(win.document.body.classList.contains('docked'), false, 'and nothing docks');
+  if (!/machine giving the talk/.test(win.document.getElementById('ask').textContent)) {
+    throw new Error('the deck does not say where the notes are');
+  }
+  key('d');
+  eq(opened, 0, 'D opens no window');
+  key('ArrowRight');
+  eq(win.document.querySelector('.slide.current').id, '2-middle', 'and the deck still moves');
+  /* On this machine the deck is as it was: N docks the notes. */
+  const here = windowFor(bodyOf(deckPage(MOVES_DECK)), [js], makeBus());
+  here.document.dispatchEvent(new here.KeyboardEvent('keydown', { key: 'n' }));
+  if (!here.document.getElementById('dock-frame')) throw new Error('on this machine N no longer docks the notes');
+});
+
+{
+  const lan = (() => {
+    for (const list of Object.values(require('os').networkInterfaces())) {
+      for (const n of list || []) if (n.family === 'IPv4' && !n.internal) return n.address;
+    }
+    return null;
+  })();
+  const name = 'over the network the script is not there: the notes window, the print page and ' +
+    'every version are a 404, and the deck comes without its notes';
+  if (!lan) {
+    console.log(`  --    ${name}\n        not run: this machine has no network address to ask from`);
+  } else {
+    check(name, () => {
+      /* A talk with no room, so the deck listens on every interface as it
+         always has; a room binds it to this machine and the question
+         would not arise. */
+      const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-script-'));
+      fs.cpSync(TALK.dir, dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'deck.md'), MOVES_SRC);
+      const probe = `
+        const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+        const http = require('http');
+        const quiet = { log(){}, warn(){}, error(){} };
+        const s = serve(${JSON.stringify(dir)}, { port: 0, log: quiet });
+        const get = (host, p, headers = {}) => new Promise((ok) => http.get({ host, port: s.address().port, path: p, headers }, (r) => {
+          let body = ''; r.on('data', (c) => { body += c; }); r.on('end', () => ok({ status: r.statusCode, body }));
+        }).on('error', (e) => ok({ status: 0, body: e.message })));
+        (async () => {
+          await new Promise((ok) => (s.listening ? ok() : s.once('listening', ok)));
+          const out = {};
+          for (const [who, host, headers] of [['here', '127.0.0.1', {}], ['lan', ${JSON.stringify(lan)}, {}],
+                                              ['tunnel', '127.0.0.1', { 'x-forwarded-for': '203.0.113.9' }]]) {
+            out[who] = {};
+            for (const p of ['/', '/presenter', '/presenter?v=1&tab=x', '/print', '/deck.md', '/js/presenter.js', '/reload']) {
+              if (p === '/reload') continue;
+              const r = await get(host, p, headers);
+              out[who][p] = { status: r.status, notes: /The first movement holds one slide/.test(r.body),
+                              off: /data-notes="off"/.test(r.body), body: r.body.slice(0, 20) };
+            }
+          }
+          console.log(JSON.stringify(out));
+          s.close(); process.exit(0);
+        })();
+      `;
+      const { status, stdout, stderr } = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 25000 });
+      fs.rmSync(dir, { recursive: true, force: true });
+      eq(status, 0, `the probe ran (${stderr.trim().split('\n')[0]})`);
+      const out = JSON.parse(stdout.trim().split('\n').pop());
+      for (const p of ['/', '/presenter', '/presenter?v=1&tab=x', '/print']) {
+        eq(out.here[p].status, 200, `from this machine, ${p}`);
+        eq(out.here[p].notes, true, `from this machine, ${p} carries the script`);
+      }
+      for (const who of ['lan', 'tunnel']) {
+        for (const p of ['/presenter', '/presenter?v=1&tab=x', '/print']) {
+          eq(out[who][p].status, 404, `${who}: ${p}`);
+          eq(out[who][p].body, 'not found', `${who}: ${p} says only that`);
+        }
+        eq(out[who]['/'].status, 200, `${who}: the deck is served`);
+        eq(out[who]['/'].notes, false, `${who}: without its notes`);
+        eq(out[who]['/'].off, true, `${who}: and says so`);
+        eq(out[who]['/js/presenter.js'].status, 200, `${who}: the notes window's code is code, not a script`);
+        eq(out[who]['/deck.md'].status, 404, `${who}: the source is never served`);
+      }
+    });
+  }
+}
+
+// ------------------------------------------------------ the join QR code
+
+/* A code that looks right and does not scan is the failure that matters
+   here, so every code is read back by a decoder this repository did not
+   write: jsQR, a devDependency the suite alone reaches for. What it is
+   handed is the SVG's own path, drawn into pixels, so the reading covers
+   the drawing and not only the matrix behind it. */
+
+const qr = require('./js/qr.js');
+const jsQR = require('jsqr');
+
+/** The SVG's dark runs, drawn black on white at `scale` pixels a module. */
+function rasterSvg(svg, scale = 6) {
+  const w = Number(svg.match(/viewBox="0 0 (\d+) \d+"/)[1]);
+  const px = w * scale;
+  const data = new Uint8ClampedArray(px * px * 4).fill(255);
+  for (const [, x, y, run] of svg.matchAll(/M(\d+) (\d+)h(\d+)v1h-\d+z/g)) {
+    for (let dy = 0; dy < scale; dy++) {
+      for (let dx = 0; dx < run * scale; dx++) {
+        const i = ((Number(y) * scale + dy) * px + Number(x) * scale + dx) * 4;
+        data[i] = data[i + 1] = data[i + 2] = 0;
+      }
+    }
+  }
+  return jsQR(data, px, px);
+}
+
+/* A matrix as an SVG path, the way qr.svg() draws one, for the checks
+   that force a mask. */
+const svgOf = (m) => {
+  let d = '';
+  m.dark.forEach((row, y) => row.forEach((on, x) => { if (on) d += `M${x + 4} ${y + 4}h1v1h-1z`; }));
+  return `<svg viewBox="0 0 ${m.size + 8} ${m.size + 8}"><path d="${d}"/></svg>`;
+};
+
+check('the QR encoder agrees with the standard where the standard gives the answer', () => {
+  /* ISO/IEC 18004's worked example: "01234567" at 1-M, its data
+     codewords and the error correction they must produce. */
+  eq(qr.ecc([16, 32, 12, 86, 97, 128, 236, 17, 236, 17, 236, 17, 236, 17, 236, 17], 10).join(','),
+     '165,36,212,193,237,54,199,135,44,85', 'the Reed-Solomon codewords');
+  eq([0, 1, 2, 3, 4, 5, 6, 7].map((m) => qr.formatBits(m).toString(2).padStart(15, '0')).join(' '),
+     '101010000010010 101000100100101 101111001111100 101101101001011 ' +
+     '100010111111001 100000011001110 100111110010111 100101010100000', 'the format information for level M');
+  eq([7, 8, 9, 10].map((v) => qr.versionBits(v).toString(16)).join(' '), '7c94 85bc 9a99 a4d3',
+     'the version information, 7 to 10');
+});
+
+check('a join address of any length it takes reads back as itself, at every version from 1 to 10', () => {
+  const base = 'http://192.168.1.7:10000/' + 'abcdefghij'.repeat(30);
+  /* Either side of each version's capacity, so every boundary is crossed. */
+  const lengths = [1, 14, 15, 26, 27, 42, 43, 62, 63, 84, 85, 106, 107, 122, 123, 152, 153, 180, 181, 213];
+  const versions = new Set();
+  for (const n of lengths) {
+    const text = base.slice(0, n);
+    const m = qr.matrix(text);
+    versions.add(m.version);
+    const got = rasterSvg(qr.svg(text));
+    if (!got) throw new Error(`${n} bytes, version ${m.version}: jsQR read nothing`);
+    eq(got.data, text, `${n} bytes`);
+    eq(got.version, m.version, `${n} bytes: the version it says it is`);
+  }
+  eq([...versions].sort((a, b) => a - b).join(','), '1,2,3,4,5,6,7,8,9,10', 'every version was drawn');
+  eq(rasterSvg(qr.svg('https://room.example/talks/ü–✓')).data, 'https://room.example/talks/ü–✓', 'UTF-8 survives');
+  let msg = '';
+  try { qr.svg('x'.repeat(214)); } catch (err) { msg = err.message; }
+  if (!/holds 213 bytes.*214/.test(msg)) throw new Error(`a text too long is not refused by name: ${msg}`);
+});
+
+check('read back without correcting anything, every block of every version is a codeword with no error in it', () => {
+  /* A decoder that corrects errors can read a code that is slightly
+     wrong, and a fault in where the bits are laid then spends the damage
+     a code can survive in a room before anyone has smudged it. So this
+     reads the data back the way the standard lays it out, written here
+     rather than borrowed from the encoder: the two-column zigzag from
+     the bottom right with the timing column skipped, the eight masks, the
+     block table for level M, and the Reed-Solomon syndromes, which are
+     all zero for a block with no error and not otherwise. From the
+     encoder it takes only which modules are fixed patterns, and checks
+     how many are left against the standard's capacity. */
+  const EXP = [], LOG = [];
+  for (let i = 0, x = 1; i < 255; i++) { EXP[i] = x; LOG[x] = i; x <<= 1; if (x & 0x100) x ^= 0x11d; }
+  const mul = (a, b) => (a && b ? EXP[(LOG[a] + LOG[b]) % 255] : 0);
+  const TABLE = { 1: [10, [[1, 16]]], 2: [16, [[1, 28]]], 3: [26, [[1, 44]]], 4: [18, [[2, 32]]], 5: [24, [[2, 43]]],
+                  6: [16, [[4, 27]]], 7: [18, [[4, 31]]], 8: [22, [[2, 38], [2, 39]]], 9: [22, [[3, 36], [2, 37]]],
+                  10: [26, [[4, 43], [1, 44]]] };
+  const REMAINDER = { 1: 0, 2: 7, 3: 7, 4: 7, 5: 7, 6: 7, 7: 0, 8: 0, 9: 0, 10: 0 };
+  const MASK = [(r, c) => (r + c) % 2 === 0, (r) => r % 2 === 0, (r, c) => c % 3 === 0, (r, c) => (r + c) % 3 === 0,
+                (r, c) => (Math.floor(r / 2) + Math.floor(c / 3)) % 2 === 0, (r, c) => (r * c) % 2 + (r * c) % 3 === 0,
+                (r, c) => ((r * c) % 2 + (r * c) % 3) % 2 === 0, (r, c) => ((r + c) % 2 + (r * c) % 3) % 2 === 0];
+  const base = 'http://192.168.1.7:10000/' + 'abcdefghij'.repeat(30);
+  for (const n of [14, 26, 42, 62, 84, 106, 122, 152, 180, 213]) {
+    const m = qr.matrix(base.slice(0, n));
+    const fixed = qr.reserved(m.version);
+    const [ecn, groups] = TABLE[m.version];
+    const total = groups.reduce((a, [k, d]) => a + k * (d + ecn), 0);
+    const bits = [];
+    let upward = true;
+    for (let right = m.size - 1; right >= 1; right -= 2) {
+      if (right === 6) right = 5;                                  // the timing column is never data
+      for (let k = 0; k < m.size; k++) {
+        const row = upward ? m.size - 1 - k : k;
+        for (const c of [right, right - 1]) {
+          if (fixed[row][c]) continue;
+          bits.push(m.dark[row][c] !== MASK[m.mask](row, c) ? 1 : 0);
+        }
+      }
+      upward = !upward;
+    }
+    eq(bits.length, total * 8 + REMAINDER[m.version], `version ${m.version}: data modules against the standard's capacity`);
+    const words = [];
+    for (let i = 0; i < total * 8; i += 8) words.push(bits.slice(i, i + 8).reduce((a, b) => a << 1 | b, 0));
+    const blocks = [];
+    for (const [k, d] of groups) for (let i = 0; i < k; i++) blocks.push({ d, cw: [] });
+    let at = 0;
+    const longest = Math.max(...blocks.map((b) => b.d));
+    for (let i = 0; i < longest; i++) for (const b of blocks) if (i < b.d) b.cw.push(words[at++]);
+    for (let i = 0; i < ecn; i++) for (const b of blocks) b.cw.push(words[at++]);
+    blocks.forEach((b, bi) => {
+      for (let j = 0; j < ecn; j++) {
+        let s = 0;
+        for (const c of b.cw) s = mul(s, EXP[j]) ^ c;                // the block at a^j
+        if (s) throw new Error(`version ${m.version}, block ${bi + 1}: syndrome ${j} is ${s}, not 0`);
+      }
+    });
+  }
+});
+
+check('every one of the eight masks reads back, and the one chosen has the lowest penalty', () => {
+  for (const text of ['http://192.168.1.7:10000/', 'https://room.example/' + 'q'.repeat(120)]) {
+    const chosen = qr.matrix(text);
+    for (let mask = 0; mask < 8; mask++) {
+      const m = qr.matrix(text, mask);
+      eq(m.mask, mask, 'forced');
+      const got = rasterSvg(svgOf(m));
+      eq(got && got.data, text, `mask ${mask}, version ${m.version}`);
+      if (m.score < chosen.score) throw new Error(`mask ${mask} scores ${m.score}, under the chosen ${chosen.mask}'s ${chosen.score}`);
+    }
+  }
+});
+
+check('the code is one path in currentColor, crisp, on a four-module quiet zone, and says what it is', () => {
+  const svg = qr.svg('http://10.0.0.2:10000/?a="b"&c');
+  const m = qr.matrix('http://10.0.0.2:10000/?a="b"&c');
+  if (!svg.includes(`viewBox="0 0 ${m.size + 8} ${m.size + 8}"`)) throw new Error('the quiet zone is not four modules a side');
+  eq((svg.match(/<path /g) || []).length, 1, 'one path');
+  if (!/<path fill="currentColor"/.test(svg) || /fill="#|stroke|<rect/.test(svg)) throw new Error('the talk does not decide the ink');
+  if (!svg.includes('shape-rendering="crispEdges"')) throw new Error('the edges are not kept crisp');
+  if (!svg.includes('aria-label="QR code for http://10.0.0.2:10000/?a=&quot;b&quot;&amp;c"')) {
+    throw new Error('the label is missing or not escaped');
+  }
+  const xs = [...svg.matchAll(/M(\d+) (\d+)/g)].flatMap((p) => [Number(p[1]), Number(p[2])]);
+  eq(Math.min(...xs), 4, 'nothing is drawn in the quiet zone');
+});
+
+check('the join address is the room\'s network, not a VPN\'s or a bridge\'s, unless told otherwise', () => {
+  const { joinHost } = require('./lib/server.js');
+  const v4 = (address) => [{ family: 'IPv4', internal: false, address }];
+  /* The machine this was written on: a VPN carrying all traffic owns the
+     default route, a mesh VPN sits beside it, and the Wi-Fi is en0. */
+  const laptop = { lo0: [{ family: 'IPv4', internal: true, address: '127.0.0.1' }], utun33: v4('10.2.0.2'),
+                   utun31: v4('100.66.145.39'), en0: v4('192.168.1.7'),
+                   awdl0: [{ family: 'IPv6', internal: false, address: 'fe80::1' }] };
+  eq(joinHost({ env: {}, nets: laptop, route: '10.2.0.2' }).host, '192.168.1.7', 'a VPN on the default route is passed over');
+  eq(joinHost({ env: {}, nets: laptop, route: '10.2.0.2' }).via, 'en0', 'and the interface is named');
+  eq(joinHost({ env: {}, nets: { en0: v4('10.0.5.20'), en1: v4('192.168.1.7') }, route: '10.0.5.20' }).host,
+     '10.0.5.20', 'the default route wins when it is the room\'s own network');
+  eq(joinHost({ env: {}, nets: { docker0: v4('172.17.0.1'), en0: v4('192.168.1.7') }, route: null }).host,
+     '192.168.1.7', 'a Docker bridge is passed over');
+  eq(joinHost({ env: {}, nets: { en5: v4('169.254.3.3') }, route: null }).host, null, 'link-local is never an answer');
+  eq(joinHost({ env: {}, nets: { utun3: v4('10.8.0.2') }, route: '10.8.0.2' }).host, '10.8.0.2',
+     'a tunnel only when there is nothing else');
+  eq(joinHost({ env: { SIPARIO_JOIN_HOST: 'talk.local' }, nets: laptop, route: '10.2.0.2' }).host, 'talk.local',
+     'SIPARIO_JOIN_HOST is taken as it is');
+  eq(joinHost({ env: { SIPARIO_JOIN_HOST: 'talk.local' }, nets: laptop, given: '10.9.9.9' }).host, '10.9.9.9',
+     'and serve()\'s own joinHost over that');
+});
+
+check('the deck draws the join code wherever a template marks one, and nowhere on paper', () => {
+  const relay = createRelay({ deck: 'Moves', throttle: 0, tick: 0, join: () => 'http://192.168.1.7:10000/' });
+  const r = render(inRoom(MOVES_SRC), TALK);
+  const deckRoom = roomWindow(bodyOf(pagesLib.deckPage(r)),
+    [js, fs.readFileSync(path.join(ROOT, 'js/qr.js'), 'utf8'), audienceJs], relay);
+  const slot = deckRoom.win.document.querySelector('.template-title [data-join-qr]');
+  if (!slot) throw new Error('the example\'s title template marks no data-join-qr');
+  eq(slot.innerHTML, '', 'empty until the relay has said where');
+  deckRoom.connect(deckRoom.room(), relay.onTally);
+  const got = rasterSvg(slot.innerHTML);
+  eq(got && got.data, 'http://192.168.1.7:10000/', 'drawn, and it reads back as the join address');
+  eq(deckRoom.win.document.querySelector('.template-title [data-join]').textContent, '192.168.1.7:10000', 'with the address under it');
+  const { printPage } = require('./lib/pages.js');
+  const paper = printPage(render(fs.readFileSync(TALK.deck, 'utf8'), TALK));
+  if (/<svg[^>]*QR code/.test(paper) || /qr\.js/.test(paper)) throw new Error('the print page carries a join code');
+  relay.close();
+});
+
+check('a deck on a relay elsewhere draws that relay\'s address before it has answered', () => {
+  const r = render(MOVES_SRC.replace('name: Moves', 'name: Moves\naudience: https://room.example/t/abc'), TALK);
+  const relay = createRelay({ deck: 'Moves', throttle: 0, tick: 0 });
+  const w = roomWindow(bodyOf(pagesLib.deckPage(r)), [js, fs.readFileSync(path.join(ROOT, 'js/qr.js'), 'utf8'), audienceJs],
+    relay, { down: true });
+  eq(w.posted[0].url, 'https://room.example/t/abc/deck', 'the deck speaks to that relay');
+  const got = rasterSvg(w.win.document.querySelector('.template-title [data-join-qr]').innerHTML);
+  eq(got && got.data, 'https://room.example/t/abc', 'and its title slide already carries its code');
+});
+
+{
+  /* The one reading that uses a real browser's pixels: the example served
+     with its room, its title slide drawn by the browser, photographed, and
+     the photograph read. A code the browser draws wrongly, too small, or
+     under the title's own words fails here. */
+  let browser = null;
+  try { browser = require('./lib/browser.js').findBrowser(); } catch { /* none here */ }
+  const name = 'drawn by a browser on each starter\'s title slide, the code reads back as the address phones join at';
+  if (!browser) {
+    console.log(`  --    ${name}\n        not run: no browser on this machine to draw it`);
+  } else {
+    check(name, () => {
+      const probe = `
+        const fs = require('fs'), zlib = require('zlib');
+        const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+        const { launch } = require(${JSON.stringify(path.join(ROOT, 'lib/browser.js'))});
+        const jsQR = require(${JSON.stringify(require.resolve('jsqr'))});
+        /* A PNG read back: its IDAT inflated and each row unfiltered. */
+        function png(buf) {
+          let p = 8, w, h, type; const idat = [];
+          while (p < buf.length) {
+            const len = buf.readUInt32BE(p), kind = buf.toString('ascii', p + 4, p + 8), body = buf.subarray(p + 8, p + 8 + len);
+            if (kind === 'IHDR') { w = body.readUInt32BE(0); h = body.readUInt32BE(4); type = body[9]; }
+            if (kind === 'IDAT') idat.push(body);
+            p += 12 + len;
+          }
+          const ch = type === 6 ? 4 : 3, raw = zlib.inflateSync(Buffer.concat(idat));
+          const out = new Uint8ClampedArray(w * h * 4), stride = w * ch;
+          let prev = Buffer.alloc(stride);
+          for (let y = 0; y < h; y++) {
+            const f = raw[y * (stride + 1)], line = Buffer.from(raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)));
+            for (let i = 0; i < stride; i++) {
+              const a = i >= ch ? line[i - ch] : 0, b = prev[i], c = i >= ch ? prev[i - ch] : 0;
+              const pa = Math.abs(b - c), pb = Math.abs(a - c), pc = Math.abs(a + b - 2 * c);
+              line[i] = (line[i] + [0, a, b, (a + b) >> 1, pa <= pb && pa <= pc ? a : pb <= pc ? b : c][f]) & 255;
+            }
+            for (let x = 0; x < w; x++) {
+              for (let k = 0; k < 3; k++) out[(y * w + x) * 4 + k] = line[x * ch + k];
+              out[(y * w + x) * 4 + 3] = 255;
+            }
+            prev = line;
+          }
+          return { w, h, data: out };
+        }
+        const up = (srv) => new Promise((ok) => srv.listening ? ok() : srv.once('listening', ok));
+        (async () => {
+          const out = {};
+          for (const st of ['minimal', 'stylish']) {
+            const s = serve(${JSON.stringify(path.join(ROOT, 'starters'))} + '/' + st, { port: 0, log: { log(){}, warn(){}, error(){} } });
+            await up(s); await up(s.room.server);
+            const b = await launch();
+            try {
+              await b.page.open('http://127.0.0.1:' + s.address().port + '/#1-a-slide-of-every-template');
+              const box = await b.page.evaluate(\`new Promise((ok) => { const t0 = Date.now(); (function wait() {
+                const el = document.querySelector('.slide.current [data-join-qr] svg');
+                if (el || Date.now() - t0 > 8000) {
+                  const r = el && document.querySelector('.slide.current').getBoundingClientRect();
+                  ok(r ? { x: r.left, y: r.top, width: r.width, height: r.height } : null);
+                } else setTimeout(wait, 100); })(); })\`);
+              if (!box) { out[st] = { drawn: false }; continue; }
+              await new Promise((ok) => setTimeout(ok, 200));
+              const img = png(await b.page.screenshot(box));
+              const got = jsQR(img.data, img.w, img.h);
+              out[st] = { drawn: true, read: got && got.data, join: s.room.join() };
+            } finally { await b.close(); s.room.relay.close(); s.close(); if (s.closeAllConnections) s.closeAllConnections(); }
+          }
+          console.log(JSON.stringify(out));
+          process.exit(0);
+        })().catch((e) => { console.log(JSON.stringify({ error: e.message })); process.exit(0); });
+      `;
+      const run = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 90000 });
+      eq(run.status, 0, `the probe ran (${run.stderr.trim().split('\n')[0]})`);
+      const out = JSON.parse(run.stdout.trim().split('\n').pop());
+      if (out.error) throw new Error(out.error);
+      for (const st of ['minimal', 'stylish']) {
+        eq(out[st].drawn, true, `${st}: the browser drew a code`);
+        eq(out[st].read, out[st].join, `${st}: and its photograph reads as the join address`);
+      }
+    });
+  }
+}
+
+// --------------------------------------------------- the slide on a phone
+
+check('a phone is served what the room has been shown, and nothing ahead of it', () => {
+  const relay = createRelay({ throttle: 0, tick: 0, grace: 0 });
+  eq(relay.reached('2-middle', 0), false, 'nothing before the deck has said where it is');
+  relay.fromDeck({ type: 'slide', id: '1-three-movements', step: 0 });
+  relay.fromDeck({ type: 'slide', id: '2-one-line-then-two', step: 0 });
+  eq(relay.reached('2-one-line-then-two', 0), true, 'the step on stage');
+  eq(relay.reached('2-one-line-then-two', 1), false, 'not the next step of its build');
+  eq(relay.reached('2-middle', 0), false, 'nor a slide the speaker jumped past');
+  eq(relay.reached('3-end', 0), false, 'nor one further on');
+  relay.fromDeck({ type: 'slide', id: '2-one-line-then-two', step: 1 });
+  relay.fromDeck({ type: 'slide', id: '1-three-movements', step: 0 });
+  eq(relay.reached('2-one-line-then-two', 1), true, 'going back, what was shown stays shown');
+  eq(JSON.stringify(relay.stage().slide), '{"id":"1-three-movements","step":0,"v":0}', 'and the phones are told where the talk is');
+  for (const bad of [-1, 1.5, '0']) eq(relay.reached('1-three-movements', bad), false, `step ${JSON.stringify(bad)}`);
+  relay.close();
+});
+
+check('a phone knows whether the deck is there, and a reload on save is not a loss', () => {
+  const relay = createRelay({ throttle: 0, tick: 0, grace: 0 });
+  eq(relay.stage().live, false, 'no deck yet');
+  const offPresenter = relay.onTally(() => {}, { of: 'win-a' });
+  eq(relay.stage().live, false, 'a presenter window is not a deck');
+  const offDeck = relay.onTally(() => {}, { deck: 'win-a' });
+  eq(relay.stage().live, true, 'a deck window is');
+  offDeck();
+  eq(relay.stage().live, false, 'and when it goes, the phones are told');
+  offPresenter();
+  relay.close();
+  /* With the grace the server gives it, a deck that drops and comes back
+     at once, as it does on every save, never reads as gone. */
+  const kind = createRelay({ throttle: 0, tick: 0 });
+  const staged = [];
+  kind.onStage((s) => staged.push(s.live));
+  const off = kind.onTally(() => {}, { deck: 'win-a' });
+  off();
+  kind.onTally(() => {}, { deck: 'win-a' });
+  eq(staged.filter((l) => l === false).length, 1, 'the only "gone" is the one from before any deck came');
+  kind.close();
+});
+
+check('a phone\'s copy of a step has no script and nothing the step has not reached', () => {
+  const { slidePage } = require('./lib/pages.js');
+  const r = render(fs.readFileSync(TALK.deck, 'utf8'), TALK);
+  const first = slidePage(r, '3-an-icon-list-builds-a-row-at-a-time', 0);
+  const second = slidePage(r, '3-an-icon-list-builds-a-row-at-a-time', 1);
+  if (!first || !second) throw new Error('the example\'s icon-list build is not served');
+  if (/Discovered, not listed/.test(first)) throw new Error('step one carries the row step two adds');
+  if (!/Discovered, not listed/.test(second)) throw new Error('step two lost its own row');
+  for (const page of [first, second]) {
+    /* What a step holds for later survives as a box and nothing else: its
+       tag and classes, a size, and no content. */
+    for (const m of page.matchAll(/<([a-z][\w-]*) class="[^"]*\b(?:hidden-step|ghost)\b[^"]*"([^>]*)>([\s\S]{0,12})/g)) {
+      if (m[2].replace(/ style="[^"]*"/, '').trim()) throw new Error(`a held <${m[1]}> kept an attribute: ${m[2]}`);
+      if (!m[3].startsWith(`</${m[1]}>`) && m[1] !== 'img') throw new Error(`a held <${m[1]}> kept its content: ${m[3]}`);
+    }
+    if (/<aside class="notes">\s*[^<\s]/.test(page)) throw new Error('a script survived');
+    if (/<script/.test(page)) throw new Error('a runtime came with it');
+    /* Served at /slide/<id>/<step>, and a template writes its figures as
+       `images/…`: without a root base they resolve under /slide/ and
+       404, which is what a real talk showed before this line. */
+    if (!page.includes('<base href="/">')) throw new Error('the step does not resolve its images from the root');
+    eq((page.match(/<section class="slide /g) || []).length, 1, 'one step, alone');
+    if (!/<section class="slide [^"]*\bcurrent\b/.test(page)) throw new Error('the step is not the current one');
+  }
+  eq(slidePage(r, '3-an-icon-list-builds-a-row-at-a-time', 2), null, 'a step the build does not have');
+  /* Given the sizes the deck measured, each held box takes exactly that
+     room; given a count that disagrees with this render, none. */
+  const heldCount = (first.match(/class="[^"]*\b(?:hidden-step|ghost)\b/g) || []).length;
+  const sized = slidePage(r, '3-an-icon-list-builds-a-row-at-a-time', 0,
+    Array.from({ length: heldCount }, (_, i) => [1128, 100 + i]));
+  eq((sized.match(/style="box-sizing:border-box;flex:none;width:1128px;height:10\dpx;/g) || []).length, heldCount,
+     'every held box sized as measured');
+  eq(slidePage(r, '3-an-icon-list-builds-a-row-at-a-time', 0, [[1, 1]]).includes('style="box-sizing'), false,
+     'and none when the deck counted a different step');
+  eq(slidePage(r, 'no-such-slide', 0), null, 'or a slide the talk does not have');
+});
+
+check('the phone shows the slide on stage, swaps it without moving, and says when the deck has gone', () => {
+  const relay = createRelay({ deck: 'Moves', throttle: 0, tick: 0, grace: 0 });
+  const phone = roomPhone(relay);
+  phone.connect(phone.room(), relay.onStage);
+  const doc = phone.win.document;
+  eq(doc.querySelectorAll('#screen iframe').length, 0, 'nothing on screen before the deck says where it is');
+  const off = relay.onTally(() => {}, { deck: 'win-a' });
+  relay.fromDeck({ type: 'slide', window: 'win-a', id: '2-one-line-then-two', step: 1 });
+  const frames = () => [...doc.querySelectorAll('#screen iframe')].map((f) => f.getAttribute('src'));
+  eq(frames().join(' '), '/slide/2-one-line-then-two/1', 'the step on stage, asked for alone');
+  relay.fromDeck({ type: 'slide', window: 'win-a', id: '2-rows', step: 0 });
+  eq(frames().join(' '), '/slide/2-one-line-then-two/1 /slide/2-rows/0', 'the next waits behind the last until it has loaded');
+  const incoming = doc.querySelectorAll('#screen iframe')[1];
+  incoming.dispatchEvent(new phone.win.Event('load'));
+  eq(frames().join(' '), '/slide/2-rows/0', 'then replaces it');
+  eq(doc.querySelector('.slide, #compass, #minimap'), null, 'the deck and its chrome are not on the phone\'s own page');
+  off();
+  if (!/gone quiet; this is the last slide/.test(doc.getElementById('status').textContent)) {
+    throw new Error(`the phone says: ${doc.getElementById('status').textContent}`);
+  }
+  eq(frames().join(' '), '/slide/2-rows/0', 'and keeps the last slide showing');
+  const before = phone.posted.length;
+  for (const k of ['ArrowRight', 'ArrowDown', 'PageDown', 'n', 'N']) doc.dispatchEvent(new phone.win.KeyboardEvent('keydown', { key: k }));
+  eq(phone.posted.length, before, 'and no key on the phone moves anything');
+  eq(relay.state.slide.id, '2-rows', 'the talk is where the deck put it');
+  relay.close();
+});
+
+check('over the network a phone never receives a script, nor a slide before the room has seen it, in either starter', () => {
+  /* Each starter served with its room, driven through every step from the
+     deck's side, and at each step every route a phone can reach asked
+     for: the phone page, its script and sheet, the talk's look, and every
+     step reached so far. Every ```notes block of the deck is looked for in
+     all of it, and every step not yet reached is asked for and refused. */
+  const { parse: parseDeck } = require('./lib/render.js');
+  const noteLines = (src) => parseDeck(src).flatMap((sl) => sl.steps.map((st) => st.note))
+    .flatMap((n) => n.split(/\n\s*\n/)).map((p) => p.replace(/\s+/g, ' ').trim())
+    .map((p) => (p.match(/[A-Za-z]+(?: [A-Za-z]+){4}/) || [])[0]).filter(Boolean);
+  for (const st of ['minimal', 'stylish']) {
+    const dir = path.join(ROOT, 'starters', st);
+    const t = talk(dir);
+    const src = fs.readFileSync(t.deck, 'utf8');
+    const steps = [];
+    for (const sl of parseDeck(src)) sl.steps.forEach((_, k) => steps.push({ id: sl.meta.id, step: k }));
+    const pollAt = steps.findIndex((x) => /poll/.test(x.id));
+    if (pollAt < 1) throw new Error(`${st}: no poll slide to look ahead to`);
+    const probe = `
+      const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+      const quiet = { log(){}, warn(){}, error(){} };
+      const s = serve(${JSON.stringify(dir)}, { port: 0, log: quiet });
+      const up = (srv) => new Promise((ok) => srv.listening ? ok() : srv.once('listening', ok));
+      const steps = ${JSON.stringify(steps)};
+      const pollAt = ${pollAt};
+      const lines = ${JSON.stringify(noteLines(src))};
+      (async () => {
+        await up(s); await up(s.room.server);
+        const deck = s.address().port, phone = s.room.port;
+        const get = async (p) => { const r = await fetch('http://127.0.0.1:' + phone + p); return { status: r.status, body: await r.text() }; };
+        const move = (id, step) => fetch('http://127.0.0.1:' + deck + '/audience/deck', { method: 'POST',
+          headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'slide', id, step }) });
+        const out = { bodies: [], ahead: [], pollSeenEarly: false };
+        /* What a phone has been sent, and whether any of it gave away the
+           poll's question before the poll's slide was on the stage. */
+        const saw = (i, body) => {
+          out.bodies.push(body);
+          if (i < pollAt && /What do you give a talk from today/.test(body)) out.pollSeenEarly = true;
+        };
+        const fixed = ['/', '/phone.js', '/phone.css', '/css/theme.css', '/deck.css'];
+        for (const p of fixed) saw(-1, (await get(p)).body);
+        for (let i = 0; i < steps.length; i++) {
+          const next = steps[i];
+          const early = await get('/slide/' + encodeURIComponent(next.id) + '/' + next.step);
+          if (early.status !== 404) out.ahead.push(next.id + '/' + next.step + ' before: ' + early.status);
+          await move(next.id, next.step);
+          for (let j = 0; j <= i; j++) {
+            const r = await get('/slide/' + encodeURIComponent(steps[j].id) + '/' + steps[j].step);
+            if (r.status !== 200) out.ahead.push(steps[j].id + '/' + steps[j].step + ' after: ' + r.status);
+            saw(i, r.body);
+          }
+          saw(i, early.body);
+        }
+        const all = out.bodies.join(' ');
+        const leaked = lines.filter((l) => all.includes(l));
+        console.log(JSON.stringify({ ahead: out.ahead, pollSeenEarly: out.pollSeenEarly, lines: lines.length,
+                                     sent: out.bodies.length, leaked }));
+        s.room.relay.close(); s.close(); process.exit(0);
+      })();
+    `;
+    const run = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 60000, maxBuffer: 64 * 1024 * 1024 });
+    eq(run.status, 0, `${st}: the probe ran (${run.stderr.trim().split('\n')[0]})`);
+    const out = JSON.parse(run.stdout.trim().split('\n').pop());
+    eq(out.ahead.join('; '), '', `${st}: every step refused until reached, and served once it was`);
+    eq(out.pollSeenEarly, false, `${st}: the poll's question reached no phone before its slide`);
+    if (out.lines < 20) throw new Error(`${st}: only ${out.lines} script lines to look for`);
+    if (out.leaked.length) throw new Error(`${st}: a phone was sent the script: "${out.leaked[0]}"`);
+    if (out.sent < steps.length) throw new Error(`${st}: only ${out.sent} responses were read`);
+  }
+});
+
+{
+  /* The phone's copy of a step against the stage, where it matters: every
+     step of every build in both starters, drawn by a browser on the stage
+     and in the phone's copy, the box of every visible element compared at
+     1280x720. The phone keeps what a step holds for later as empty boxes
+     the deck measured, so the two must agree; dropping those boxes moved
+     rows by 258px on a spread list, which is what Paul's phone showed. */
+  let browser = null;
+  try { browser = require('./lib/browser.js').findBrowser(); } catch { /* none here */ }
+  const name = "on a phone every step of every build is laid out as it is on the stage, in both starters";
+  if (!browser) {
+    console.log(`  --    ${name}\n        not run: no browser on this machine to lay them out`);
+  } else {
+    check(name, () => {
+      const probe = `
+        const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+        const { launch } = require(${JSON.stringify(path.join(ROOT, 'lib/browser.js'))});
+        const { parse } = require(${JSON.stringify(path.join(ROOT, 'lib/render.js'))});
+        const fs = require('fs');
+        const up = (srv) => new Promise((ok) => srv.listening ? ok() : srv.once('listening', ok));
+        const MEASURE = \`(async () => {
+          await document.fonts.ready;
+          await new Promise((ok) => setTimeout(ok, 300));
+          const s = document.querySelector('.slide.current');
+          const base = s.getBoundingClientRect(), k = 1280 / base.width;
+          return [...s.querySelectorAll('.stage *')]
+            .filter((el) => !el.closest('.hidden-step, .ghost') && getComputedStyle(el).visibility !== 'hidden')
+            .map((el) => { const r = el.getBoundingClientRect();
+              return [el.tagName.toLowerCase(), (r.x - base.x) * k, (r.y - base.y) * k, r.width * k, r.height * k]; })
+            .filter((b) => b[3] > 0 || b[4] > 0);
+        })()\`;
+        (async () => {
+          const out = {};
+          for (const st of ['minimal', 'stylish']) {
+            const dir = ${JSON.stringify(path.join(ROOT, 'starters'))} + '/' + st;
+            const s = serve(dir, { port: 0, log: { log(){}, warn(){}, error(){} } });
+            await up(s); await up(s.room.server);
+            const b = await launch();
+            const r = out[st] = { steps: 0, elements: 0, worst: 0, at: '', apart: [] };
+            try {
+              for (const sl of parse(fs.readFileSync(dir + '/deck.md', 'utf8'))) {
+                if (sl.steps.length < 2) continue;
+                for (let k = 0; k < sl.steps.length; k++) {
+                  const stepId = sl.meta.id + (k ? '-' + (k + 1) : '');
+                  await b.page.open('http://127.0.0.1:' + s.address().port + '/#' + encodeURIComponent(stepId));
+                  const stage = await b.page.evaluate(MEASURE);
+                  await b.page.open('http://127.0.0.1:' + s.room.port + '/slide/' + encodeURIComponent(sl.meta.id) + '/' + k);
+                  const phone = await b.page.evaluate(MEASURE);
+                  r.steps++;
+                  if (stage.length !== phone.length) { r.apart.push(stepId + ': ' + stage.length + ' against ' + phone.length); continue; }
+                  stage.forEach((a, i) => {
+                    r.elements++;
+                    const d = Math.max(...[1, 2, 3, 4].map((j) => Math.abs(a[j] - phone[i][j])));
+                    if (a[0] !== phone[i][0]) r.apart.push(stepId + ': ' + a[0] + ' against ' + phone[i][0]);
+                    if (d > r.worst) { r.worst = d; r.at = stepId + ' <' + a[0] + '>'; }
+                  });
+                }
+              }
+            } finally { await b.close(); s.room.relay.close(); s.close(); if (s.closeAllConnections) s.closeAllConnections(); }
+          }
+          console.log(JSON.stringify(out));
+          process.exit(0);
+        })().catch((e) => { console.log(JSON.stringify({ error: e.message })); process.exit(0); });
+      `;
+      const run = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 180000 });
+      eq(run.status, 0, `the probe ran (${run.stderr.trim().split('\n')[0]})`);
+      const out = JSON.parse(run.stdout.trim().split('\n').pop());
+      if (out.error) throw new Error(out.error);
+      for (const st of ['minimal', 'stylish']) {
+        const r = out[st];
+        if (r.steps < 5) throw new Error(`${st}: only ${r.steps} build steps compared`);
+        eq(r.apart.join('; '), '', `${st}: the same elements show on both`);
+        if (r.worst > 2) throw new Error(`${st}: ${r.at} is ${r.worst.toFixed(1)}px out on the phone`);
+      }
+    });
+  }
+}
+
+check('what a phone may fetch from images/ is what the room has been shown, and the look of the talk', () => {
+  const { references } = require('./lib/pages.js');
+  eq(references('<img src="images/a.png"><img srcset="images/b.png 1x, images/c.png 2x">' +
+    '<svg><image href="images/d.png"/><image xlink:href="images/e.png"/></svg><video poster="images/f.png"></video>' +
+    '<div style="background:url(&quot;images/g.png&quot;)"></div><a href="images/h.png?x=1&amp;y=2">h</a>').join(' '),
+     'images/a.png images/d.png images/e.png images/f.png images/h.png?x=1&y=2 images/b.png images/c.png images/g.png',
+     'every kind of reference markup can make, entities decoded');
+
+  /* Each starter served with its room and walked through from the deck's
+     side, the images asked for as a phone would, before and after the
+     step that first shows them. */
+  for (const st of ['minimal', 'stylish']) {
+    const dir = path.join(ROOT, 'starters', st);
+    const probe = `
+      const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+      const s = serve(${JSON.stringify(dir)}, { port: 0, log: { log(){}, warn(){}, error(){} } });
+      const up = (srv) => new Promise((ok) => srv.listening ? ok() : srv.once('listening', ok));
+      (async () => {
+        await up(s); await up(s.room.server);
+        const get = async (p) => (await fetch('http://127.0.0.1:' + s.room.port + p)).status;
+        const move = (id, step) => fetch('http://127.0.0.1:' + s.address().port + '/audience/deck', { method: 'POST',
+          headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'slide', id, step }) });
+        const ask = async () => { const o = {}; for (const p of [
+          '/images/icon-folder.svg', '/images/icon-file-text.svg', '/images/one-piece.svg', '/images/in-layers.svg',
+          '/images/bg-blob.svg', '/images/bg-grid.svg', '/images/ICON-FOLDER.SVG', '/images/icon-folder.svg?x=1',
+          '/images/./icon-folder.svg', '/images/%69con-folder.svg', '/images/..%2fdeck.md', '/images/%2e%2e/deck.md',
+          '/images/icon-folder.svg%00', '/images/../images/icon-folder.svg', '/images/'] ) o[p] = await get(p); return o; };
+        const out = {};
+        await move('1-a-slide-of-every-template', 0);
+        out.start = await ask();
+        await move('3-an-icon-list-builds-a-row-at-a-time', 0);
+        out.rowOne = await ask();
+        await move('3-an-icon-list-builds-a-row-at-a-time', 1);
+        out.rowTwo = await ask();
+        await move('3-a-figure-that-arrives-whole', 0);
+        out.figure = await ask();
+        await move('1-a-slide-of-every-template', 0);
+        out.back = await ask();
+        console.log(JSON.stringify(out));
+        s.room.relay.close(); s.close(); process.exit(0);
+      })();
+    `;
+    const run = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 30000 });
+    eq(run.status, 0, `${st}: the probe ran (${run.stderr.trim().split('\n')[0]})`);
+    const o = JSON.parse(run.stdout.trim().split('\n').pop());
+    const css = st === 'minimal';                        // minimal's sheets name two images; stylish's none
+    eq(o.start['/images/bg-blob.svg'], css ? 200 : 404, `${st}: an image deck.css names, from the first slide`);
+    eq(o.start['/images/bg-grid.svg'], css ? 200 : 404, `${st}: and one a template's sheet names`);
+    for (const p of ['/images/icon-folder.svg', '/images/icon-file-text.svg', '/images/one-piece.svg',
+                     '/images/ICON-FOLDER.SVG', '/images/icon-folder.svg?x=1', '/images/./icon-folder.svg',
+                     '/images/%69con-folder.svg']) {
+      eq(o.start[p], 404, `${st}: ${p} on the first slide`);
+    }
+    eq(o.rowOne['/images/icon-file-text.svg'], 200, `${st}: the icon of the row on stage`);
+    eq(o.rowOne['/images/icon-folder.svg'], 404, `${st}: not the icon of a row this build has still to show`);
+    eq(o.rowTwo['/images/icon-folder.svg'], 200, `${st}: which is sent once its step is on the stage`);
+    eq(o.rowTwo['/images/icon-folder.svg?x=1'], 200, `${st}: a query changes nothing`);
+    eq(o.rowTwo['/images/%69con-folder.svg'], 200, `${st}: nor does an encoded letter`);
+    eq(o.rowTwo['/images/one-piece.svg'], 404, `${st}: a later slide's figure is still refused`);
+    eq(o.figure['/images/one-piece.svg'], 200, `${st}: until its slide`);
+    eq(o.back['/images/one-piece.svg'], 200, `${st}: and going back takes nothing away`);
+    for (const stage of ['start', 'figure']) {
+      eq(o[stage]['/images/in-layers.svg'], 404, `${st}: a figure drawn into the page is never fetched, so never sent`);
+      for (const p of ['/images/..%2fdeck.md', '/images/%2e%2e/deck.md', '/images/icon-folder.svg%00', '/images/']) {
+        eq(o[stage][p], 404, `${st}: ${p}`);
+      }
+    }
+  }
+});
+
+check('the reactions and the pace stay on the phone while a poll or the form is asked, under it', () => {
+  const relay = createRelay({ deck: 'Moves', throttle: 0, tick: 0, grace: 0 });
+  const phone = roomPhone(relay);
+  phone.connect(phone.room(), relay.onStage);
+  const doc = phone.win.document;
+  const order = () => [...doc.querySelectorAll('#phone > * > section, #phone > * > form')].map((e) => e.className).join(' ');
+  eq(order(), 'react', 'nothing asked: reactions and pace, as before');
+  relay.fromDeck({ type: 'poll-open', id: 'which', question: 'Which one?', options: ['This', 'That'] });
+  eq(order(), 'poll react', 'a poll: the question first, the reactions and the pace still there under it');
+  eq(doc.querySelectorAll('.reactions button').length, 5, 'every reaction');
+  eq(doc.querySelectorAll('.pace button').length, 3, 'and the pace');
+  relay.fromDeck({ type: 'poll-close', id: 'which' });
+  relay.fromDeck({ type: 'feedback-open', questions: [{ kind: 'rate', text: 'Useful?' }, { kind: 'ask', text: 'Change?' }] });
+  eq(order(), 'feedback react', 'the form, and still the reactions and the pace');
+  relay.fromDeck({ type: 'poll-open', id: 'late', question: 'One more?', options: ['Yes', 'No'] });
+  eq(order(), 'poll feedback react', 'a poll over the form hides neither');
+  relay.close();
+});
+
+check('what somebody is typing into the form survives the talk moving on under them', () => {
+  const relay = createRelay({ deck: 'Moves', throttle: 0, tick: 0, grace: 0 });
+  relay.fromDeck({ type: 'feedback-open', questions: [{ kind: 'rate', text: 'Useful?' }, { kind: 'ask', text: 'Change?' }] });
+  const phone = roomPhone(relay);
+  phone.connect(phone.room(), relay.onStage);
+  const doc = phone.win.document;
+  const area = doc.querySelector('textarea');
+  area.focus();
+  area.value = 'More demos, fewer';
+  area.dispatchEvent(new phone.win.Event('input'));
+  doc.querySelectorAll('.scale button')[4].click();
+  /* The slide changes, a poll opens and closes over the form, the deck
+     comes and goes, and the person presses a reaction and the pace. */
+  relay.fromDeck({ type: 'slide', id: '2-middle', step: 0 });
+  relay.fromDeck({ type: 'poll-open', id: 'late', question: 'One more?', options: ['Yes', 'No'] });
+  relay.fromDeck({ type: 'slide', id: '2-rows', step: 1 });
+  const off = relay.onTally(() => {}, { deck: 'win-a' });
+  off();
+  relay.fromDeck({ type: 'poll-close', id: 'late' });
+  doc.querySelector('.reactions button').click();
+  doc.querySelectorAll('.pace button')[2].click();
+  area.focus();                                         // a tap elsewhere moved focus; it is theirs to move back
+  relay.fromDeck({ type: 'slide', id: '3-end', step: 0 });
+  eq(doc.querySelector('textarea'), area, 'the same box, never rebuilt');
+  eq(area.value, 'More demos, fewer', 'with what they had typed');
+  eq(doc.activeElement, area, 'and the cursor still in it');
+  eq(doc.querySelectorAll('.scale button')[4].getAttribute('aria-pressed'), 'true', 'and the score they had chosen');
+  relay.close();
+});
+
+check('the pace goes on counting while a poll is open, and the presenter window goes on showing it', () => {
+  const relay = createRelay({ deck: 'T', throttle: 0, tick: 0 });
+  const pres = roomPresenter(render(pollDeck(GOOD_POLL), TALK), relay);
+  pres.connect(pres.room(), relay.onTally);
+  relay.fromDeck({ type: 'poll-open', id: 'which', question: 'Which one?', options: ['This', 'That'] });
+  for (const [tok, v] of [['phone-aaaa', 1], ['phone-bbbb', 1], ['phone-cccc', 0]]) {
+    eq(relay.fromPhone({ type: 'pace', token: tok, value: v }).status, 200, `pace from ${tok} during the poll`);
+  }
+  relay.fromPhone({ type: 'vote', token: 'phone-aaaa', poll: 'which', option: 1 });
+  const doc = pres.win.document;
+  if (!/0 slower · 1 fine · 2 faster/.test(doc.querySelector('[data-room-pace]').textContent)) {
+    throw new Error(`the panel says: ${doc.querySelector('[data-room-pace]').textContent}`);
+  }
+  eq(doc.querySelector('.notes-bar [data-room-alert]').textContent, 'poll which: 1 answer', 'beside the poll\'s count');
+  relay.close();
+});
+
+/* A movement holding two polls, and a movement after it. */
+const TWO_POLLS = `name: Polls
+audience: local
+
+# One
+
+## 1.1 First
+id: 1-first
+template: statement
+
+One.
+
+\`\`\`notes
+n
+\`\`\`
+
+## 1.2 Asked
+id: 1-asked
+template: poll
+
+\`\`\`poll
+id: which
+question: Which one?
+- This
+- That
+\`\`\`
+
+\`\`\`notes
+n
+\`\`\`
+
+## 1.3 After
+id: 1-after
+template: statement
+
+After.
+
+\`\`\`notes
+n
+\`\`\`
+
+## 1.4 Again
+id: 1-again
+template: poll
+
+\`\`\`poll
+id: again
+question: And now?
+- Yes
+- No
+\`\`\`
+
+\`\`\`notes
+n
+\`\`\`
+
+## 1.5 Last
+id: 1-last
+template: statement
+
+Last.
+
+\`\`\`notes
+n
+\`\`\`
+
+# Two
+
+## 2.1 Next
+id: 2-next
+template: statement
+
+Next.
+
+\`\`\`notes
+n
+\`\`\`
+`;
+
+check('a poll stays open for the rest of its movement, the relay deciding from where the deck is', () => {
+  const relay = createRelay({ deck: 'Polls', throttle: 0, tick: 0 });
+  const r = render(TWO_POLLS, TALK);
+  const deckRoom = roomDeck(r, relay);
+  const hello = deckRoom.posted.find((p) => p.msg.type === 'hello').msg;
+  eq(hello.polls.map((p) => `${p.id}@${p.at}/${p.movement}/${p.slide}`).join(' '), 'which@1/0/1-asked again@3/0/1-again',
+     'the deck tells the relay where each poll sits');
+  const pres = roomPresenter(r, relay);
+  pres.connect(pres.room(), relay.onTally);
+  deckRoom.connect(deckRoom.room(), relay.onTally);
+  const doc = deckRoom.win.document;
+  const key = (k) => doc.dispatchEvent(new deckRoom.win.KeyboardEvent('keydown', { key: k }));
+  const walk = [];
+  const note = () => walk.push(`${doc.querySelector('.slide.current').id}:${relay.tally().poll || '-'}`);
+  note();
+  for (let i = 0; i < 4; i++) { key('ArrowDown'); note(); }
+  key('ArrowRight'); note();
+  key('ArrowLeft'); note();
+  key('ArrowUp'); key('ArrowUp'); note();
+  key('ArrowUp'); key('ArrowUp'); note();
+  eq(walk.join(' '), '1-first:- 1-asked:which 1-after:which 1-again:again 1-last:again 2-next:- ' +
+     '1-last:again 1-after:which 1-first:-',
+     'opened at its step, open through the rest of the movement, replaced by a later one, closed outside it and before it');
+
+  /* Off its slide the poll still takes votes, the presenter is told the
+     phones still show it, and the bars on its slide have them all. */
+  key('ArrowDown'); key('ArrowDown');                   // 1-after, `which` open off its slide
+  eq(relay.fromPhone({ type: 'vote', token: 'phone-aaaa', poll: 'which', option: 1 }).status, 200, 'a vote off its slide counts');
+  eq(relay.fromPhone({ type: 'vote', token: 'phone-aaaa', poll: 'again', option: 0 }).status, 409, 'a poll not open is refused');
+  eq(pres.win.document.querySelector('.notes-bar [data-room-alert]').textContent, 'poll open: Which one? · 1 answer',
+     'the presenter window says the phones still show it');
+  key('ArrowUp');                                       // back on 1-asked
+  eq(pres.win.document.querySelector('.notes-bar [data-room-alert]').textContent, 'poll which: 1 answer', 'and on its slide says so plainly');
+  eq(doc.querySelector('.slide.current [data-option="1"]').getAttribute('data-votes'), '1', 'the bars hold the vote made off the slide');
+  eq(doc.querySelector('.slide.current [data-option="1"]').style.getPropertyValue('--share'), '1', 'as its share');
+
+  /* A phone that voted sees its choice again when the poll comes back. */
+  const phone = roomPhone(relay);
+  phone.win.localStorage.setItem(`sipario-vote:${relay.session}:which`, '1');
+  phone.connect(phone.room(), relay.onStage);
+  key('ArrowRight');                                    // into movement two: closed
+  eq(phone.win.document.querySelector('.poll'), null, 'closed, the phone shows no poll');
+  key('ArrowLeft');                                     // back to where movement one was left: 1-asked
+  eq(phone.win.document.querySelector('.options button[aria-pressed="true"]').textContent, 'That',
+     'back in the movement, the phone shows the answer it gave');
+  relay.close();
+});
+
+// ------------------------------------------------ one window drives the room
+
+check('the room takes position from one deck window, the first to arrive until another claims it', () => {
+  const relay = createRelay({ throttle: 0, tick: 0, grace: 0 });
+  const heard = { a: [], b: [], notesOfB: [] };
+  const offA = relay.onTally((t) => heard.a.push(t.room), { deck: 'win-a' });
+  const offB = relay.onTally((t) => heard.b.push(t.room), { deck: 'win-b' });
+  relay.onTally((t) => heard.notesOfB.push(t.room), { of: 'win-b' });
+  const last = (k) => heard[k][heard[k].length - 1];
+  const move = (w, id, step = 0) => relay.fromDeck({ type: 'slide', window: w, id, step });
+  move('win-a', '1-first');
+  eq(relay.state.slide.id, '1-first', 'the first window to arrive holds the room');
+  eq(move('win-b', '2-later').body.ignored, 'another window holds the room', 'a second window is told it does not');
+  eq(relay.state.slide.id, '1-first', 'and does not move the room');
+  eq(relay.reached('2-later', 0), false, 'nor mark anything reached');
+  relay.fromDeck({ type: 'slide', id: '2-later', step: 0 });
+  eq(relay.state.slide.id, '1-first', 'nor does a message that names no window, once a window holds the room');
+  eq(`${last('a')} ${last('b')} ${last('notesOfB')}`, 'yours other other', 'each window, and each deck\'s notes, is told which it is');
+  eq(relay.fromDeck({ type: 'claim', window: 'win-b', id: '2-later', step: 1 }).status, 200, 'the second window claims the room');
+  eq(`${relay.state.slide.id}/${relay.state.slide.step}`, '2-later/1', 'and the room moves to where it is, at once');
+  eq(relay.reached('2-later', 1), true, 'from then on, what it shows is reached');
+  move('win-a', '1-second');
+  eq(relay.state.slide.id, '2-later', 'now the first window is the one ignored');
+  eq(`${last('a')} ${last('notesOfB')}`, 'other yours', "and the second window's notes are told their deck holds it");
+  eq(relay.fromDeck({ type: 'claim', window: 'notes-window', id: '9-x', step: 0 }).status, 409,
+     'a window that is not a connected deck, such as a notes window, cannot claim');
+  offB();
+  eq(last('a'), 'none', 'the holder gone, the room is held by nobody');
+  eq(relay.stage().live, false, 'the phones are told the deck has gone');
+  eq(relay.stage().slide.id, '2-later', 'and keep the last slide it showed');
+  move('win-a', '1-third');
+  eq(relay.stage().slide.id, '2-later', 'no other window takes over by itself');
+  relay.fromDeck({ type: 'claim', window: 'win-a', id: '1-third', step: 0 });
+  eq(`${relay.stage().slide.id} ${relay.stage().live}`, '1-third true', 'until one claims it');
+  offA();
+  relay.close();
+});
+
+check('the holder reloading on a save keeps the room, and only past the grace does it lose it', () => {
+  const relay = createRelay({ throttle: 0, tick: 0, grace: 60000 });
+  const offA = relay.onTally(() => {}, { deck: 'win-a' });
+  relay.onTally(() => {}, { deck: 'win-b' });
+  relay.fromDeck({ type: 'claim', window: 'win-a', id: '1-first', step: 0 });
+  offA();                                               // the page unloads...
+  relay.onTally(() => {}, { deck: 'win-a' });           // ...and the same tab, the same id, comes back
+  relay.fromDeck({ type: 'slide', window: 'win-b', id: '2-later', step: 0 });
+  eq(relay.state.slide.id, '1-first', 'the other window still cannot move it');
+  relay.fromDeck({ type: 'slide', window: 'win-a', id: '1-second', step: 0 });
+  eq(relay.state.slide.id, '1-second', 'the reloaded holder can');
+  eq(relay.stage().live, true, 'and the phones never saw it go');
+  relay.close();
+});
+
+check('in the browser, a second deck window is ignored until it claims, by H or by going full screen', () => {
+  const relay = createRelay({ deck: 'Moves', throttle: 0, tick: 0, grace: 0 });
+  const bus = makeBus();
+  const one = roomDeck(ROOM_DECK, relay, { bus });
+  one.connect(one.room(), asWindow(relay, one.room()));
+  const two = roomDeck(ROOM_DECK, relay, { bus, url: 'http://localhost:9999/#2-middle' });
+  two.connect(two.room(), asWindow(relay, two.room()));
+  const idOf = (w) => w.win.document.getElementById('deck').getAttribute('data-window');
+  if (idOf(one) === idOf(two)) throw new Error('two tabs share an id');
+  const pres = roomPresenter(ROOM_DECK, relay, { bus, url: `http://localhost:9999/presenter?tab=${idOf(two)}` });
+  pres.connect(pres.room(), asWindow(relay, pres.room()));
+  const hold = () => pres.win.document.querySelector('.notes-bar [data-room-alert]').textContent;
+  const key = (w, k) => w.win.document.dispatchEvent(new w.win.KeyboardEvent('keydown', { key: k }));
+  eq(relay.state.slide.id, '1-three-movements', 'the first window holds the room');
+  eq(hold(), 'Another window holds the room. Press H in this deck, or go full screen, to take it.',
+     "the second deck's notes say so, and how to take it");
+  key(two, 'ArrowDown');
+  eq(relay.state.slide.id, '1-three-movements', "the second window's moves are ignored");
+  eq(relay.reached('2-one-line-then-two', 0), false, 'and reach nothing');
+  key(two, 'h');
+  eq(relay.state.slide.id, '2-one-line-then-two', 'H takes the room, where the window is');
+  eq(hold(), '', 'and its notes have nothing to warn of');
+  key(one, 'ArrowRight');
+  eq(relay.state.slide.id, '2-one-line-then-two', "now the first window's moves are ignored");
+  Object.defineProperty(one.win.document, 'fullscreenElement', { value: one.win.document.documentElement, configurable: true });
+  one.win.document.dispatchEvent(new one.win.Event('fullscreenchange'));
+  eq(relay.state.slide.id, '2-middle', 'going full screen takes it back, where that window is');
+  Object.defineProperty(one.win.document, 'fullscreenElement', { value: null, configurable: true });
+  one.win.document.dispatchEvent(new one.win.Event('fullscreenchange'));
+  key(one, 'ArrowDown');
+  eq(relay.state.slide.id, '2-one-line-then-two', 'and leaving full screen keeps it');
+  eq(pres.posted.length, 0, 'the notes window never says anything that could hold the room');
+  relay.close();
+});
+
+check('a tab the browser duplicates, sessionStorage and all, is given an id of its own', () => {
+  const relay = createRelay({ deck: 'Moves', throttle: 0, tick: 0 });
+  const bus = makeBus();
+  const one = roomDeck(ROOM_DECK, relay, { bus });
+  const original = one.win.document.getElementById('deck').getAttribute('data-window');
+  /* The copy arrives later, carrying the original's sessionStorage. */
+  const copy = roomDeck(ROOM_DECK, relay, { bus, before: (w) => {
+    w.sessionStorage.setItem('notes-tab', original);
+    const real = w.Date.now.bind(w.Date);
+    w.Date.now = () => real() + 5000;
+  } });
+  const now = copy.win.document.getElementById('deck').getAttribute('data-window');
+  if (!now || now === original) throw new Error(`the copy still answers to ${original}`);
+  eq(copy.win.sessionStorage.getItem('notes-tab'), now, 'and keeps its new one for its own reloads');
+  eq(one.win.document.getElementById('deck').getAttribute('data-window'), original, 'the original keeps its own');
+  eq(copy.room().url.endsWith(`deck=${now}`), true, 'and the copy speaks to the room as the new window');
+  relay.close();
+});
+
+check('over the network a deck window that does not hold the room cannot make a slide reachable', () => {
+  /* The 7.2 spoiler, in the starter: a second window at a later slide,
+     never claiming. The phones must not be able to fetch it. Where each
+     slide sits is said as the deck says it: its place among every step,
+     and its movement. */
+  const { parse: parseDeck, grouped: groupedDeck } = require('./lib/render.js');
+  const place = {};
+  let n = 0;
+  groupedDeck(parseDeck(fs.readFileSync(TALK.deck, 'utf8'))).forEach((g, gi) => g.slides.forEach((sl) => {
+    place[sl.meta.id] = { at: n, movement: gi };
+    n += sl.steps.length;
+  }));
+  const pollSlide = place['3-a-poll-put-to-the-room'];
+  const probe = `
+    const place = ${JSON.stringify(place)};
+    const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+    const s = serve(${JSON.stringify(TALK.dir)}, { port: 0, log: { log(){}, warn(){}, error(){} } });
+    const up = (srv) => new Promise((ok) => srv.listening ? ok() : srv.once('listening', ok));
+    const http = require('http');
+    (async () => {
+      await up(s); await up(s.room.server);
+      const deck = s.address().port;
+      const post = (body) => fetch('http://127.0.0.1:' + deck + '/audience/deck', { method: 'POST',
+        headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+      const open = (id) => new Promise((ok) => http.get({ host: '127.0.0.1', port: deck, path: '/audience/stream?deck=' + id }, (r) => {
+        r.once('data', () => ok(r));
+      }));
+      const phone = async (p) => (await fetch('http://127.0.0.1:' + s.room.port + p)).status;
+      const at = (id) => ({ id, step: 0, at: place[id].at, movement: place[id].movement });
+      await post({ type: 'hello', deck: 'sipario:minimal', name: 'Minimal', polls: [{ id: 'how-you-present',
+        question: 'What do you give a talk from today?', options: ['A', 'B'], slide: '3-a-poll-put-to-the-room',
+        at: ${pollSlide.at}, movement: ${pollSlide.movement} }] });
+      const a = await open('win-a');
+      await post({ type: 'slide', window: 'win-a', ...at('1-a-slide-of-every-template') });
+      const b = await open('win-b');
+      const said = await post({ type: 'slide', window: 'win-b', ...at('3-a-poll-put-to-the-room') });
+      const out = { said, before: await phone('/slide/3-a-poll-put-to-the-room/0'),
+                    held: await phone('/slide/1-a-slide-of-every-template/0'), poll: s.room.relay.tally().poll };
+      await post({ type: 'claim', window: 'win-b', ...at('3-a-poll-put-to-the-room') });
+      out.after = await phone('/slide/3-a-poll-put-to-the-room/0');
+      out.pollAfter = s.room.relay.tally().poll;
+      console.log(JSON.stringify(out));
+      a.destroy(); b.destroy(); s.room.relay.close(); s.close(); process.exit(0);
+    })();
+  `;
+  const run = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 25000 });
+  eq(run.status, 0, `the probe ran (${run.stderr.trim().split('\n')[0]})`);
+  const out = JSON.parse(run.stdout.trim().split('\n').pop());
+  eq(out.said.ignored, 'another window holds the room', 'the second window is told it does not hold the room');
+  eq(out.before, 404, 'its slide is not fetchable');
+  eq(out.held, 200, "the holder's is");
+  eq(out.poll, null, 'nor does it open the poll on that slide');
+  eq(out.after, 200, 'once it claims the room, its slide is');
+  eq(out.pollAfter, 'how-you-present', 'and its poll');
+});
+
+check('a server asked for no room opens none, whatever the deck says', () => {
+  /* The export serves a talk this way. A photograph of the deck has no
+     business listening on the network. */
+  const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-noroom-'));
+  fs.cpSync(TALK.dir, dir, { recursive: true });
+  const deckFile = path.join(dir, 'deck.md');
+  fs.writeFileSync(deckFile, inRoom(fs.readFileSync(deckFile, 'utf8')));
+  const probe = `
+    const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+    const quiet = { log(){}, warn(){}, error(){} };
+    const s = serve(${JSON.stringify(dir)}, { port: 0, log: quiet, audience: false });
+    s.once('listening', () => { console.log(JSON.stringify({ room: s.room })); s.close(); process.exit(0); });
+  `;
+  const { status, stdout, stderr } = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 25000 });
+  fs.rmSync(dir, { recursive: true, force: true });
+  eq(status, 0, `the probe ran (${stderr.trim().split('\n')[0]})`);
+  eq(JSON.parse(stdout.trim().split('\n').pop()).room, null, 'no room');
+  if (!/serve\([^)]*audience: false/.test(fs.readFileSync(path.join(ROOT, 'lib/export.js'), 'utf8'))) {
+    throw new Error('the export serves the talk without saying `audience: false`');
+  }
 });
 
 // ------------------------------------------------ the engine and its format
@@ -2510,6 +4550,7 @@ check('the server serves the print page', () => {
     const quiet = { log(){}, warn(){}, error(){} };
     const s = serve(${JSON.stringify(TALK.dir)}, { port: 0, log: quiet });
     (async () => {
+      await new Promise((ok) => (s.listening ? ok() : s.once('listening', ok)));
       const port = s.address().port;
       const r = await fetch('http://localhost:' + port + '/print');
       const body = await r.text();
@@ -3086,9 +5127,10 @@ check('the shared half names no template of the talk it happens to be serving', 
   /* The review trigger for this whole split. `render.js` gave `section`
      its word and `presenter.js` looked for `p.statement-line`; both were
      a talk's design sitting in code every other talk reads. */
-  const shared = ['css/theme.css', 'css/presenter.css', 'css/print.css', 'js/deck.js',
-                  'js/presenter.js', 'lib/render.js', 'lib/pages.js', 'lib/engine.js',
-                  'lib/templates.js', 'lib/export.js', 'lib/pptx.js', 'lib/browser.js']
+  const shared = ['css/theme.css', 'css/presenter.css', 'css/print.css', 'css/phone.css', 'js/deck.js',
+                  'js/presenter.js', 'js/audience.js', 'js/phone.js', 'js/qr.js', 'lib/render.js', 'lib/pages.js',
+                  'lib/engine.js', 'lib/templates.js', 'lib/export.js', 'lib/pptx.js', 'lib/browser.js',
+                  'lib/relay.js', 'lib/server.js']
     .map((f) => [f, fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')]);
   for (const k of names) {
     for (const [f, text] of shared) {
@@ -3103,7 +5145,7 @@ check("every url() in the frame's stylesheets resolves to a file", () => {
      property is dropped and the page renders as though nobody had asked
      for it. */
   const missing = [];
-  for (const sheet of ['css/theme.css', 'css/presenter.css', 'css/print.css']) {
+  for (const sheet of ['css/theme.css', 'css/presenter.css', 'css/print.css', 'css/phone.css']) {
     const text = fs.readFileSync(path.join(ROOT, sheet), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
     for (const m of text.matchAll(/url\(\s*['"]?([^'")]+)['"]?\s*\)/g)) {
       const ref = m[1].trim();
@@ -3122,7 +5164,7 @@ check('colours in the frame are named for their purpose, not their value', () =>
      scale to know what it is changing. Names say the job instead. */
   const SCALES = /var\(--(slate|teal|gray|zinc|neutral|stone|indigo|sky|blue|amber)-?\d*\)/;
   const VALUES = /var\(--(white|black|green|red|blue|indigo|purple|orange)\)/;
-  for (const f of ['css/theme.css', 'css/presenter.css', 'css/print.css']) {
+  for (const f of ['css/theme.css', 'css/presenter.css', 'css/print.css', 'css/phone.css']) {
     for (const line of fs.readFileSync(path.join(ROOT, f), 'utf8').split('\n')) {
       const m = line.match(SCALES) || line.match(VALUES);
       if (m) throw new Error(`${f} asks for ${m[0]}, which names a colour rather than a job`);
@@ -3207,7 +5249,7 @@ check('the server serves the pages and the sheets, and not the templates', () =>
     const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
     const quiet = { log(){}, warn(){}, error(){} };
     const s = serve(${JSON.stringify(TALK.dir)}, { port: 0, log: quiet });
-    const port = s.address().port;
+    let port;
     const get = async (u) => { const r = await fetch('http://localhost:' + port + u);
                                return { status: r.status, type: r.headers.get('content-type'),
                                         body: await r.text() }; };
@@ -3221,6 +5263,8 @@ check('the server serves the pages and the sheets, and not the templates', () =>
       r.once('data', (c) => { ok({ type: r.headers['content-type'], chunk: String(c) }); r.destroy(); });
     }));
     (async () => {
+      await new Promise((ok) => (s.listening ? ok() : s.once('listening', ok)));
+      port = s.address().port;
       const page = await get('/');
       const out = {
         status: page.status,
@@ -3394,11 +5438,12 @@ check('the server notices a save that replaces the file, not only one that rewri
       fs.renameSync(deck + '.tmp', deck);
     };
     const events = [];
-    require('http').get({ port: s.address().port, path: '/reload' }, (r) => {
-      r.on('data', (c) => events.push(String(c)));
-    });
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     (async () => {
+      await new Promise((ok) => (s.listening ? ok() : s.once('listening', ok)));
+      require('http').get({ port: s.address().port, path: '/reload' }, (r) => {
+        r.on('data', (c) => events.push(String(c)));
+      });
       await wait(400);
       for (let i = 0; i < 3; i++) { replace(); await wait(400); }
       console.log(JSON.stringify(events.length - 1));   // less the one sent on connect
@@ -3426,8 +5471,9 @@ check('a deck that does not render yet is served as its error, and the server st
     const logged = [];
     const log = { log(m){ logged.push(m); }, warn(){}, error(m){ logged.push(m); } };
     const s = serve(${JSON.stringify(dir)}, { port: 0, log });
-    const port = s.address().port;
     (async () => {
+      await new Promise((ok) => (s.listening ? ok() : s.once('listening', ok)));
+      const port = s.address().port;
       const r = await fetch('http://localhost:' + port + '/');
       const body = await r.text();
       console.log(JSON.stringify({ status: r.status, error: /declared 3.50/.test(body),
@@ -3477,11 +5523,13 @@ check('the notes page says which version it is, and an earlier one can be asked 
     const quiet = { log(){}, warn(){}, error(){} };
     const dir = ${JSON.stringify(dir)};
     const s = serve(dir, { port: 0, log: quiet });
-    const port = s.address().port;
+    let port;
     const get = async (u) => (await fetch('http://localhost:' + port + u)).text();
     const ver = (html) => (html.match(/data-version="([^"]*)"/) || [])[1];
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     (async () => {
+      await new Promise((ok) => (s.listening ? ok() : s.once('listening', ok)));
+      port = s.address().port;
       /* The room opens first, and only the deck page is served before the
          save; the notes come later and ask for what the room is seeing. */
       await get('/');

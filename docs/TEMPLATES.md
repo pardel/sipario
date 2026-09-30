@@ -34,12 +34,13 @@ starters/minimal/templates/         <- a talk's own set, and the fixture
   section.html     section.js        <- the movement's name, from `meta.group`
   diff.html        diff.js           <- colouring by the first column
   tree.html        tree.js           <- splitting a path from its note
+  poll.html                          <- markup only; the deck writes the answers
 ```
 
 **The library ships none of these.** They are one talk's design, copied
 into the next talk and changed there. Nothing in `lib/render.js` names
 one. Adding a template is adding an `.html`,
-and a `.js` only if it needs one. **Three need no JavaScript at all**, and
+and a `.js` only if it needs one. **Four need no JavaScript at all**, and
 the suite fails if that stops being true of any of them: if every one
 grew a `data`, the markup would have drifted back into code and the split
 would be buying nothing.
@@ -131,8 +132,41 @@ Every template, without writing any JavaScript:
 | `fenced` | The first fenced block's content, fence removed. |
 | `pairs` | `- line` + its indented note, as `{lead, note}`. |
 | `imagePath` | URL prefix for figures and icons. Default `images`. |
+| `poll` | The step's poll, or `null`: `{ id, question, options }`, each option `{ text, index }`. A template that never reaches for this makes a ```` ```poll ```` on its slides an error. |
 
 Then whatever `<name>.js` returns, merged over the above.
+
+## A poll, and the room
+
+A poll's answers arrive while the slide is up, so the template cannot be
+handed them; it marks where they go, and the deck's runtime writes them
+there. Nothing in the library knows what they look like.
+
+| The template writes | The runtime writes, as the room answers |
+|---|---|
+| `data-option="{{index}}"` on each option's element | `data-votes="7"` on it, how many chose it, and `--share: 0.35`, its part of all the answers, from 0 to 1 |
+| | `data-answers="20"` on the slide, how many answered |
+| `data-join` on any element, on any slide | its text: the address phones join at, `192.168.1.20:10000` |
+| `data-join-qr` on any element, on any slide | an inline SVG QR code of that address, in `currentColor` on a four-module quiet zone, sized to the element |
+
+So a bar is `width: calc(var(--share, 0) * 100%)`, a count is
+`content: attr(data-votes)` on `[data-votes]`, and a line that should
+wait for the address can hide itself with `:has([data-join]:empty)`.
+The example's `poll.html` does all three. Before anyone has answered,
+and on paper, none of these is set, and the options print bare.
+
+Every option has to be marked: a poll whose template prints it and marks
+no `data-option` for an option stops the render, because the room's
+answers would have nowhere to land and the bars would never move.
+
+`data-join` and `data-join-qr` are not a poll's alone. The example's
+`title` template marks both, so the code is on the slide the room sits
+looking at while it arrives. Give the code's element a size, a light
+ground of its own (`background: var(--ground)`, since a code read through
+a tinted slide reads badly), and keep the slide's words clear of it: the
+example reserves the room with `.stage:has(.title-qr:not(:empty))`, so a
+deck with no room is laid out as before. Both stay empty on paper, where
+a network address would be dead by the time anyone read it.
 
 ## Writing a data function
 
@@ -166,6 +200,31 @@ and the suite checks the arity for that reason.
 back where this split took it from. `image.js` is the one place that
 returns a fragment, because inlining an SVG and hiding groups inside it is
 a transform on a document rather than a template's job.
+
+## On a phone
+
+A phone in the room is sent the slide on stage one step at a time, and a
+step's markup holds what the step has not reached yet: the rows a build
+has still to show, hidden with `hidden-step`, and a standfirst held for
+height as a `ghost`. So in a phone's copy every element marked either way
+is kept as an empty box, its tag and classes and nothing else, sized to
+exactly what the deck measured it at on the stage. The layout is the
+stage's to the pixel, a spread list's auto margins included, and the
+words and figures it holds for later never leave the laptop. **A template
+that reserves height by some other means is sending its future to the
+phones**: reserve with those two classes, as the example's templates do.
+
+The copy is served from `/slide/<id>/<step>` under a root base, so a
+figure written `images/…` resolves as it does on the stage. It carries
+no script, and no runtime runs on it.
+
+**An image reaches a phone only by being named.** The phones are sent a
+file from `images/` once a step already on the stage refers to it in its
+visible markup (`src`, `srcset`, an SVG `<image>`'s `href`, `poster`, or
+`url(…)` in a style), or when `deck.css` or a template's sheet does.
+Anything else under `images/` answers 404, so a figure's file name is not
+a way to see it early. A figure a template draws into the page, as the
+example's layered `image` does, is never fetched and so never sent.
 
 ## Class names
 
@@ -229,6 +288,8 @@ are the same on every step.
 | A class a template writes without its prefix | Test | the class and the prefix it wanted |
 | A deck naming a template its talk does not have | Render | every such slide, and the set it does have |
 | A `>` standfirst a template never prints | Render | the slide, and the template ignoring it |
+| A ```` ```poll ```` on a template that never prints one | Render | the slide, and the template ignoring it |
+| A poll whose template marks no `data-option` for an option | Render | the step, the template, and the index |
 | A deck still using the old `kind:` key | Render | every such slide, and what to write instead |
 | A deck in the old `---` shape | Render | that `---` opened a slide, and what opens one now |
 | A `slide:`, `group:`, `title:` or `word:` key | Render | the key, and which header took it over |

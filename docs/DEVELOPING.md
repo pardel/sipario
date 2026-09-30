@@ -10,7 +10,9 @@ the page shows.
 npm install
 ```
 
-One package arrives, `jsdom`, and only the suite uses it. The library
+Two packages arrive, `jsdom` and `jsqr`, and only the suite uses them:
+`jsqr` reads back every QR code the library draws, a decoder this
+repository did not write. The library
 depends on nothing outside Node, so a talk that links this folder by path
 (`npm install ../path/to/sipario`) runs whether or not this step was
 ever taken. Node 22 or later. jsdom itself asks for a newer 22 than
@@ -29,8 +31,9 @@ Then http://localhost:9999. `PORT=8080 npm run minimal` moves it.
 The server renders `deck.md` on every request and holds an event stream
 open to the page. Saving anything under `starters/minimal/`, `lib/`,
 `css/` or `js/` reloads the browser, and the renderer's modules are
-dropped from the require cache first, so an edit to the engine takes
-effect without a restart. `lib/server.js` is the exception: the server
+dropped from the require cache first, so an edit to the engine, or to
+the pages it writes (`lib/pages.js`), takes effect without a restart.
+`lib/server.js` is the exception, and with it the room's relay: the server
 already listening is the old copy of itself, so restart it.
 
 A deck that cannot render answers with the error rather than a page. That
@@ -65,9 +68,9 @@ to exactly what the lockfile says.
 | Path | Holds |
 |---|---|
 | `index.js` | the public surface: everything a consumer may require |
-| `lib/` | the parser and renderer, the template engine, the shared checks, the CLI, the server, and the export: the browser driver, the .pptx writer and the two commands over them |
-| `js/` | what runs in the browser: `deck.js` in the room, `presenter.js` in the notes |
-| `css/` | the frame's stylesheet, the presenter's and the print page's, and no talk's design |
+| `lib/` | the parser and renderer, the template engine, the shared checks, the CLI, the server, and the export: the browser driver, the .pptx writer and the two commands over them. The room: `relay.js` (the protocol and its state), `pace.js` (the pace rule, alone) and `results.js` (where sessions live, and the JSON and CSV) |
+| `js/` | what runs in the browser: `deck.js` in the room, `presenter.js` in the notes, `audience.js` in both for a deck that opens the room, `qr.js`, which draws the join code there and loads under Node for the suite, and `phone.js` on the audience's phones |
+| `css/` | the frame's stylesheet, the presenter's, the print page's and the phone page's, and no talk's design |
 | `bin/` | argv, and nothing else; the commands are in `lib/cli.js` |
 | `docs/` | the format, writing a template, and the calls behind the engine |
 | `starters/minimal/` | the shortest complete talk |
@@ -87,12 +90,21 @@ like, so change the engine instead unless the example is what is wrong.
 npm test
 ```
 
-217 checks, one line each, with a count at the end and exit status 1 if
+278 checks, one line each, with a count at the end and exit status 1 if
 any failed. Nothing stops at the first failure: every check runs, so one
-broken thing does not hide the next. One check needs a browser on the
-machine, exports the example both ways and reads the files back; with no
-Chrome, Chromium, Brave or Edge to be found it prints a line saying so
-and is not counted either way.
+broken thing does not hide the next. Five checks need a browser on the
+machine: three export the example both ways and read the files back, and
+break a copy of it to see the export refuse, one photographs each
+starter's title slide and reads its QR code off the picture, and one lays
+out every build step on the stage and in a phone's copy and compares
+them. One needs a
+network address of the machine's own, to ask a served talk for its script
+as another machine would. A check that cannot run prints a line saying
+why and is not counted either way, so a machine with no browser runs 273
+and one with no network as well runs 272.
+
+The suite writes a room's sessions to a scratch `SIPARIO_DATA` of its
+own, so running it leaves nothing among your real ones.
 
 Broadly, what they cover:
 
@@ -102,7 +114,8 @@ Broadly, what they cover:
 | moving through a talk | the arrows and PageDown reach every step in order, each movement remembers where it was left, Shift with up returns to the head of the movement you are in, the map opens and Enter plays a build rather than dropping you at its end |
 | builds and figures | a step adds rather than restates, height is reserved so nothing shifts, a layered SVG reveals one group per step, and a misspelt layer name stops the render |
 | ids and numbers | every slide declares both, a number or a section that disagrees with where the slide sits stops the render, and `renumber` agrees with the renderer |
-| the presenter window | docked and detached are the same page, the channel between the two windows carries both directions, and the reset asks before forgetting |
+| the presenter window | docked and detached are the same page, the channel between the two windows carries both directions, the reset asks before forgetting, and the script is served to this machine alone |
+| the room | `audience:` and its refusals, a deck without it making no request, the relay's limits and one vote a phone, the pace rule's contract, the deck, presenter and phone pages run against an in-process relay, polls and the feedback form refused by name, the phones' listener refusing everything but the room, and `results` read back from a served session |
 | the format | front matter, scripts, and every renamed or unknown key refused by name rather than ignored |
 | the template engine | a folder is read and compiled once, two talks load apart, and a template the talk has no file for is refused with the set named |
 | the CLI | `new` copies the example, renames it from the folder and refuses a folder that already holds something; the old bin names still run |
@@ -173,8 +186,10 @@ before calling it done.
   parser, and it stays one.
 - **There are no dependencies.** Nothing under `lib/` or `bin/` requires
   anything outside Node; the server is `node:http`, and the file serving
-  it needs sits beside the routes in `server.js`. `jsdom` is a devDependency the
-  suite alone reaches for, and the suite checks the rest of this claim.
+  it needs sits beside the routes in `server.js`. The room is the same
+  module: an event stream one way and a POST the other, and no WebSocket.
+  `jsdom` is a devDependency the suite alone reaches for, and the suite
+  checks the rest of this claim.
   The export borrows a browser installed on the machine, driven over its
   own DevTools protocol with Node's WebSocket, and ships none.
 - **Errors stop the render.** A standfirst on a slide whose template never
