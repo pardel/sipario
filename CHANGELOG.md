@@ -12,6 +12,17 @@ so a break ships as a minor and this file is the whole of the warning.
   join at `https://room.example.com/` rather than a LAN address. The
   banner names the port to point it at; an address with a path or no
   scheme is said and the LAN address used. The notes' link is unchanged.
+- **Fixed:** with two deck windows open, detached notes showed no phones,
+  reactions or pace, and said nothing was wrong. Each page held an event
+  stream per thing it listened to, and a browser allows six connections
+  to one origin: the notes, asking last, waited for ever. A page now holds
+  one, `/events`, carrying the reload, the room's tally and the notes on
+  another device by name; four deck windows and the notes fit with room
+  to spare.
+- **Changed:** `/reload`, `/audience/stream`, `GET /remote/window` and
+  `/remote/stream` are gone, replaced by `/events`. A page served by an
+  older sipario reconnects to nothing until it is reloaded. A relay
+  elsewhere (`audience: https://…`) keeps its own `<base>/stream`.
 
 ## 0.5.0 — 2026-09-30
 

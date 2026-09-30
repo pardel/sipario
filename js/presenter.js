@@ -18,8 +18,8 @@
   var CHANNEL = document.getElementById("deck").getAttribute("data-deck") || "";
 
   /* On another device the deck is not in this browser, and the channel to
-     it is carried by the server instead (js/remote.js, loaded first, says
-     so here). The messages are the same either way. */
+     it is carried by the server instead (js/remote.js, loaded before this,
+     says so here). The messages are the same either way. */
   function channel(name) {
     if (window.__remoteChannel) return window.__remoteChannel(name);
     return window.BroadcastChannel ? new BroadcastChannel(name) : null;
@@ -385,15 +385,16 @@
   }, 1200);
   if (!bus) document.body.classList.add("orphan");
 
-  if (window.EventSource && window.fetch) {
+  /* The save arrives as the deck's does, a `reload` on this page's one
+     stream (js/events.js). */
+  if (window.EventSource && window.fetch && window.siparioEvents) {
     var token = null;
-    var stream = new EventSource("/reload");
-    stream.onmessage = function (ev) {
-      if (token === null) { token = ev.data; return; }
-      if (ev.data === token) return;
-      token = ev.data;
+    window.siparioEvents.on("reload", function (data) {
+      if (token === null) { token = data; return; }
+      if (data === token) return;
+      token = data;
       fetchPage(token);
-    };
+    });
   }
 
   var wasPainted = false;

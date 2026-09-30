@@ -3,8 +3,9 @@
  * Loaded only on a page whose deck names an audience, so a deck that
  * does not make no audience request of any kind: this file is not on its
  * page. The relay is `/audience` on the deck's own origin for
- * `audience: local`, or the address the deck gives; the messages are the
- * same either way, and lib/relay.js is where they are written down.
+ * `audience: local`, whose tally arrives on the page's one stream, or the
+ * address the deck gives; the messages are the same either way, and
+ * lib/relay.js is where they are written down.
  *
  * The same file runs in two windows and does a different job in each.
  * In the deck it says where the talk is, so the phones can follow the
@@ -307,31 +308,49 @@
     return q ? decodeURIComponent(q[1]) : "";
   }
 
+  function heard(data) {
+    var t;
+    try { t = JSON.parse(data); } catch (e) { return; }
+    if (!t || t.type !== "tally") return;
+    unreachable(false);
+    /* The presenter's previews are its hidden copy of the deck, so the
+       answers are written there too, and a preview of a poll shows them. */
+    onStage(t);
+    bar.phones = t.phones + (t.phones === 1 ? " phone" : " phones");
+    bar.reactions = (t.reactions || []).map(function (r) { return r.emoji + " " + r.count; }).join("   ");
+    bar.pace = paceText(t.pace || { reading: null, n: 0 });
+    last = t;
+    paintAlert();
+    if (panel) return;
+    float(t);
+  }
+
+  /* The relay inside serve is on the deck's own origin, and its tally
+     arrives on this page's one stream (js/events.js): a stream of its own
+     was one more of the six connections a browser allows an origin. It
+     is asked for as a deck window, by this window's id, or as the notes,
+     by their deck's, which is none for notes opened by hand. A room that
+     is not open says so on it, and the stream failing is the relay
+     failing, since the two are one server. A relay elsewhere is another
+     origin, with connections of its own, and has a stream of its own. */
+  var events = WHERE === "local" ? window.siparioEvents : null;
+  if (events) {
+    events.ask(function () { return panel ? { of: ownerOf() } : { deck: windowId() }; });
+    events.on("tally", heard);
+    events.on("relay", function () { unreachable(true); });
+    events.on("error", function () { unreachable(true); });
+  }
   var es = null;
   function listen() {
-    if (!window.EventSource) { unreachable(true); return; }
+    if (!window.EventSource || (WHERE === "local" && !events)) { unreachable(true); return; }
+    if (events) { events.again(); return; }
     if (es && es.close) es.close();
     es = new window.EventSource(BASE + "/stream" +
       (panel ? (ownerOf() ? "?of=" + encodeURIComponent(ownerOf()) : "")
              : "?deck=" + encodeURIComponent(windowId())));
     es.onopen = function () { unreachable(false); };
     es.onerror = function () { unreachable(true); };
-    es.onmessage = function (ev) {
-      var t;
-      try { t = JSON.parse(ev.data); } catch (e) { return; }
-      if (!t || t.type !== "tally") return;
-      unreachable(false);
-      /* The presenter's previews are its hidden copy of the deck, so the
-         answers are written there too, and a preview of a poll shows them. */
-      onStage(t);
-      bar.phones = t.phones + (t.phones === 1 ? " phone" : " phones");
-      bar.reactions = (t.reactions || []).map(function (r) { return r.emoji + " " + r.count; }).join("   ");
-      bar.pace = paceText(t.pace || { reading: null, n: 0 });
-      last = t;
-      paintAlert();
-      if (panel) return;
-      float(t);
-    };
+    es.onmessage = function (ev) { heard(ev.data); };
   }
 
   if (WHERE !== "local") join(deck, BASE);

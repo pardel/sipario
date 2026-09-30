@@ -875,9 +875,11 @@
   /* ---- reload when deck.md changes
    *
    * The server holds a Server-Sent Events stream open and pushes a token
-   * whenever deck.md, the stylesheet, the script or an asset changes.
-   * One-way is all this needs, and EventSource reconnects by itself, so
-   * restarting the server reloads the page rather than stranding it.
+   * whenever deck.md, the stylesheet, the script or an asset changes: a
+   * `reload` on the page's one stream (js/events.js), which carries the
+   * room and the notes on another device as well. One-way is all this
+   * needs, and EventSource reconnects by itself, so restarting the server
+   * reloads the page rather than stranding it.
    *
    * The polling this replaced could not work at all from a file:// URL,
    * where the browser treats every local file as its own origin and
@@ -897,24 +899,23 @@
         : "Live reload: connecting.";
   }
 
-  if (window.EventSource) {
-    var stream = new EventSource("/reload");
-    stream.onmessage = function (ev) {
+  if (window.EventSource && window.siparioEvents) {
+    window.siparioEvents.on("reload", function (data) {
       watching = "watching";
       watchNote();
       /* The first token names the version on screen. Say so to the
          notes at once: a window waiting to apply this version has been
          told `null` until now. */
-      if (token === null) { token = ev.data; publish(); return; }
-      if (ev.data === token) return;
+      if (token === null) { token = data; publish(); return; }
+      if (data === token) return;
       /* Never yank the deck out from under a talk. The save is held, not
          dropped: leaving fullscreen takes it. Until then `token` stays at
          the version on screen, which is what the notes follow. */
-      if (document.fullscreenElement) { pending = ev.data; return; }
-      token = ev.data;
+      if (document.fullscreenElement) { pending = data; return; }
+      token = data;
       save();
       location.reload();
-    };
+    });
     document.addEventListener("fullscreenchange", function () {
       if (document.fullscreenElement || pending === null) return;
       token = pending;
@@ -922,7 +923,7 @@
       save();
       location.reload();
     });
-    stream.onerror = function () { watching = "blocked"; watchNote(); };
+    window.siparioEvents.on("error", function () { watching = "blocked"; watchNote(); });
   } else {
     watching = "blocked";
   }

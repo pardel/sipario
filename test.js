@@ -58,6 +58,34 @@ const talkCss = () => [TALK.deckCss].concat(
   .map((f) => fs.readFileSync(f, 'utf8')).join('\n');
 const css = fs.readFileSync(path.join(ROOT, 'css/theme.css'), 'utf8') + talkCss();
 const js = fs.readFileSync(path.join(ROOT, 'js/deck.js'), 'utf8');
+/* Loaded first on the deck's page and the notes', as the server loads it;
+   the phone's page does without. */
+const eventsJs = fs.readFileSync(path.join(ROOT, 'js/events.js'), 'utf8');
+const phoneJs = fs.readFileSync(path.join(ROOT, 'js/phone.js'), 'utf8');
+
+/* An event stream with no server behind it. A check speaks for the
+   server with `emit(name, data)`: an event by name reaches whatever
+   listens for that name, and `message` reaches `onmessage` too, as it
+   does in a browser. Closing it lets go of whatever the check wired it
+   to, as the server's end does when a page goes. */
+function fakeStream(streams) {
+  return function (url) {
+    const heard = {};
+    this.url = url;
+    this.readyState = 1;
+    this.addEventListener = (name, fn) => { (heard[name] = heard[name] || []).push(fn); };
+    this.emit = (name, data) => {
+      const ev = { type: name, data: typeof data === 'string' ? data : JSON.stringify(data) };
+      if (name === 'message' && this.onmessage) this.onmessage(ev);
+      for (const fn of heard[name] || []) fn(ev);
+    };
+    this.close = () => { if (this.off) this.off(); this.off = null; this.readyState = 2; };
+    streams.push(this);
+  };
+}
+
+/* What the browser does once the page's scripts have run. */
+const parsed = (w) => w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
 
 /* The runtime reads the talk's name off this attribute, so every page the
    suite builds carries it exactly as the served page does. */
@@ -87,9 +115,10 @@ function harness(main) {
   const { window } = dom;
   /* No server in a test. What the page asks for is kept, so a check can
      say what a deck reached for as well as what it did. */
-  const opened = [];
+  const streams = [];
+  const opened = streams;
   const fetched = [];
-  window.EventSource = function (url) { opened.push(url); this.close = () => {}; };
+  window.EventSource = fakeStream(streams);
   window.fetch = (url) => { fetched.push(url); return Promise.reject(new Error('no network in a test')); };
   window.open = () => ({ closed: false, focus() {}, close() { this.closed = true; } });
   Object.defineProperty(window, 'innerWidth', { value: 1600, configurable: true });
@@ -211,12 +240,16 @@ const { window, errors, doc, current, key, forget } = fixture;
 console.log(`deck: ${slides} slides, ${steps} steps`);
 
 check('deck.js runs without throwing', () => {
+  window.eval(eventsJs);
   window.eval(js);
+  parsed(window);
   if (errors.length) throw new Error(errors[0].detail || errors[0].message);
 });
 
 check('and runs on a deck of three movements', () => {
+  MOVES.window.eval(eventsJs);
   MOVES.window.eval(js);
+  parsed(MOVES.window);
   if (MOVES.errors.length) throw new Error(MOVES.errors[0].detail || MOVES.errors[0].message);
 });
 
@@ -1279,12 +1312,13 @@ function windowFor(body, scripts, Bus, url, before) {
     { runScripts: 'outside-only', pretendToBeVisual: true,
       url: url || 'http://localhost:9999/', virtualConsole: con });
   d.window.BroadcastChannel = Bus;
-  d.window.EventSource = function () { this.close = () => {}; };
+  d.window.EventSource = fakeStream([]);
   d.window.open = () => ({ closed: false, focus() {}, close() { this.closed = true; } });
   Object.defineProperty(d.window, 'innerWidth', { value: 1600, configurable: true });
   Object.defineProperty(d.window, 'innerHeight', { value: 900, configurable: true });
   if (before) before(d.window);                    // e.g. seed storage, as a reload would find it
-  for (const src of scripts) d.window.eval(src);
+  for (const src of scripts.includes(phoneJs) ? scripts : [eventsJs].concat(scripts)) d.window.eval(src);
+  parsed(d.window);
   if (errs.length) throw new Error(errs[0].detail || errs[0].message);
   return d.window;
 }
@@ -2181,7 +2215,6 @@ check('the presenter says it is following a deck only once one has spoken', () =
 
 const { createRelay } = require('./lib/relay.js');
 const audienceJs = fs.readFileSync(path.join(ROOT, 'js/audience.js'), 'utf8');
-const phoneJs = fs.readFileSync(path.join(ROOT, 'js/phone.js'), 'utf8');
 
 /* A deck opened to the room, and a slide of every kind it can hold. */
 const inRoom = (src) => src.replace(/^name: (.*)$/m, 'name: $1\naudience: local');
@@ -2206,13 +2239,17 @@ function roomWindow(body, scripts, relay, { down = false, bus = makeBus(), url =
       return Promise.resolve({ ok: r.status === 200, status: r.status,
                                json: () => Promise.resolve(r.body) });
     };
-    w.EventSource = function (url) { this.url = url; this.close = () => {}; streams.push(this); };
+    w.EventSource = fakeStream(streams);
   });
   /* Connected the way a stream connects: the listener hears the current
-     state at once, then every change. */
-  const connect = (es, subscribe) => subscribe((event) => es.onmessage({ data: JSON.stringify(event) }));
-  /* The page's own reload stream is open too; the room's is the other. */
-  const room = () => streams.find((es) => /\/stream(\?|$)/.test(es.url));
+     state at once, then every change. On the page's one stream the tally
+     is an event by name; on a stream of the relay's own, the phone's or
+     one elsewhere, it is the stream's only kind. */
+  const connect = (es, subscribe) => { es.off = subscribe((event) => es.emit(es.url.startsWith('/events') ? 'tally' : 'message', event)); };
+  /* The stream the room speaks on: the page's one stream when it asks
+     for the room, else a stream of the relay's own. The latest open. */
+  const room = () => streams.filter((es) => es.readyState !== 2 &&
+    (/^\/events\?(.*&)?(deck|of)=/.test(es.url) || /\/stream(\?|$)/.test(es.url))).pop();
   return { win, streams, posted, connect, room };
 }
 
@@ -2256,8 +2293,9 @@ check('a deck with no audience makes no audience request at all', () => {
     if (/audience|qr\.js/.test(page)) throw new Error('a page with no room mentions the audience');
   }
   /* And behavioural: the fixture has run every check above this one, and
-     all it ever opened is the reload stream. */
-  eq(fixture.opened.join(' '), '/reload', 'streams the fixture opened');
+     all it ever opened is its one stream, asking for nothing but the
+     reload that every page hears. */
+  eq(fixture.opened.map((es) => es.url).join(' '), '/events', 'streams the fixture opened');
   eq(fixture.fetched.length, 0, 'requests the fixture made');
 });
 
@@ -2312,9 +2350,9 @@ check('a deck in a room says where it is as it moves, and only when it moves', (
   const before = posted.length;
   win.document.dispatchEvent(new win.KeyboardEvent('keydown', { key: 'ArrowUp' }));   // nowhere to go
   eq(posted.length, before, 'a key that moved nothing sends nothing');
-  eq(streams.map((s) => s.url.replace(/deck=[a-z0-9]+$/, 'deck=<window>')).join(' '), '/reload /audience/stream?deck=<window>',
-     'and it listens to the relay\'s tally, as a deck window, by its id');
-  eq(streams[1].url.endsWith('deck=' + win.document.getElementById('deck').getAttribute('data-window')), true, 'its own');
+  eq(streams.map((s) => s.url.replace(/deck=[a-z0-9]+$/, 'deck=<window>')).join(' '), '/events?deck=<window>',
+     'and it listens to the relay\'s tally on its one stream, as a deck window, by its id');
+  eq(streams[0].url.endsWith('deck=' + win.document.getElementById('deck').getAttribute('data-window')), true, 'its own');
   relay.close();
 });
 
@@ -2333,8 +2371,12 @@ check('a relay that cannot be reached is said once, in the presenter window, and
   /* And the deck still moves: the talk does not wait on the room. */
   deckRoom.win.document.dispatchEvent(new deckRoom.win.KeyboardEvent('keydown', { key: 'ArrowRight' }));
   eq(deckRoom.win.document.querySelector('.slide.current').id, '2-middle', 'the deck moved on');
-  pres.room().onopen();
+  pres.connect(pres.room(), relay.onTally);
   eq(note.textContent, '', 'and the note goes when the relay answers');
+  /* With the relay inside serve the stream is the deck's own, and a room
+     that is not open says so on it rather than failing it. */
+  pres.room().emit('relay', { open: false });
+  eq(note.textContent.split('not answering').length - 1, 1, 'a room that is not open is said the same way');
   relay.close();
 });
 
@@ -2392,8 +2434,17 @@ check('on the network a phone reaches the room and nothing else: not the deck, n
     const quiet = { log(){}, warn(){}, error(){} };
     const s = serve(${JSON.stringify(dir)}, { port: 0, log: quiet });
     const up = (srv) => new Promise((ok) => srv.listening ? ok() : srv.once('listening', ok));
-    const first = (port, p) => new Promise((ok) => http.get({ host: '127.0.0.1', port, path: p }, (r) => {
-      r.once('data', (c) => { ok(JSON.parse(String(c).replace(/^data: /, ''))); r.destroy(); });
+    /* The first event of a name on a stream, or of none when none is given. */
+    const first = (port, p, name = 'message') => new Promise((ok) => http.get({ host: '127.0.0.1', port, path: p }, (r) => {
+      let buf = '';
+      r.on('data', (c) => {
+        buf += c;
+        for (let i = buf.indexOf('\\n\\n'); i > -1; i = buf.indexOf('\\n\\n')) {
+          const block = buf.slice(0, i); buf = buf.slice(i + 2);
+          if (((/^event: (.*)$/m.exec(block) || [])[1] || 'message') !== name) continue;
+          ok(JSON.parse(/^data: (.*)$/m.exec(block)[1])); r.destroy(); return;
+        }
+      });
     }));
     const status = async (port, p, init) => (await fetch('http://127.0.0.1:' + port + p, init)).status;
     const json = (body) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -2410,12 +2461,12 @@ check('on the network a phone reaches the room and nothing else: not the deck, n
         hello: await (await fetch('http://127.0.0.1:' + deck + '/audience/deck', json({ type: 'hello', deck: 'x', title: 'Minimal' }))).json(),
         plain: await status(deck, '/audience/deck', { method: 'POST', body: '{"type":"hello"}' }),
         plainPhone: await status(phone, '/phone', { method: 'POST', body: '{"type":"react"}' }),
-        tally: await first(deck, '/audience/stream'),
+        tally: await first(deck, '/events?of=', 'tally'),
         stage: await first(phone, '/stream'),
       };
-      for (const p of ['/presenter', '/print', '/js/deck.js', '/js/audience.js', '/js/presenter.js', '/reload',
-                       '/css/presenter.css', '/templates/title.html', '/templates/icon-list.js',
-                       '/audience/stream', '/audience/deck', '/deck.md', '/images/..%2fdeck.md',
+      for (const p of ['/presenter', '/print', '/js/deck.js', '/js/audience.js', '/js/presenter.js', '/js/events.js',
+                       '/events', '/css/presenter.css', '/templates/title.html', '/templates/icon-list.js',
+                       '/audience/deck', '/deck.md', '/images/..%2fdeck.md',
                        '/fonts/..%2fdeck.md', '/slide/1-a-slide-of-every-template/0', '/images/one-piece.svg']) {
         out.refused[p] = await status(phone, p);
       }
@@ -3012,8 +3063,8 @@ check('a deck opened from another machine carries no notes, and N and D open not
           for (const [who, host, headers] of [['here', '127.0.0.1', {}], ['lan', ${JSON.stringify(lan)}, {}],
                                               ['tunnel', '127.0.0.1', { 'x-forwarded-for': '203.0.113.9' }]]) {
             out[who] = {};
-            for (const p of ['/', '/presenter', '/presenter?v=1&tab=x', '/print', '/deck.md', '/js/presenter.js', '/reload']) {
-              if (p === '/reload') continue;
+            for (const p of ['/', '/presenter', '/presenter?v=1&tab=x', '/print', '/deck.md', '/js/presenter.js', '/events']) {
+              if (p === '/events') continue;
               const r = await get(host, p, headers);
               out[who][p] = { status: r.status, notes: /The first movement holds one slide/.test(r.body),
                               off: /data-notes="off"/.test(r.body), body: r.body.slice(0, 20) };
@@ -3375,6 +3426,85 @@ check('a deck on a relay elsewhere draws that relay\'s address before it has ans
         eq(out[st].drawn, true, `${st}: the browser drew a code`);
         eq(out[st].read, out[st].join, `${st}: and its photograph reads as the join address`);
       }
+    });
+  }
+}
+
+{
+  /* A browser opens six connections at once to one origin and no more,
+     and an event stream holds one for as long as its page is open. Each
+     page used to hold one per thing it listened to, so two deck windows
+     and the notes were more than six, and the notes, last to ask, waited
+     for ever: the room's figures never arrived, and nothing said so. The
+     windows here are frames of one page, which share the one pool as
+     windows do, held by the print page because it streams nothing and
+     never reloads. Four decks and the notes: the notes must hear the
+     room, and one save must reach all five. */
+  let browser = null;
+  try { browser = require('./lib/browser.js').findBrowser(); } catch { /* none here */ }
+  const name = 'in a browser, four deck windows and the notes fit in the six connections one origin is allowed: ' +
+    'the notes hear the room, and a save reaches every window';
+  if (!browser) {
+    console.log(`  --    ${name}\n        not run: no browser on this machine to open them in`);
+  } else {
+    check(name, () => {
+      const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-pool-'));
+      fs.cpSync(TALK.dir, dir, { recursive: true });
+      const probe = `
+        const fs = require('fs');
+        const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+        const { launch } = require(${JSON.stringify(path.join(ROOT, 'lib/browser.js'))});
+        const s = serve(${JSON.stringify(dir)}, { port: 0, log: { log(){}, warn(){}, error(){} } });
+        const up = (srv) => new Promise((ok) => srv.listening ? ok() : srv.once('listening', ok));
+        (async () => {
+          await up(s); await up(s.room.server);
+          const b = await launch();
+          const out = {};
+          try {
+            await b.page.open('http://127.0.0.1:' + s.address().port + '/print');
+            out.before = await b.page.evaluate(\`new Promise((ok) => {
+              const add = (src) => { const f = document.createElement('iframe'); f.src = src; f.width = 480; f.height = 270;
+                                     document.body.prepend(f); return f; };
+              window.decks = [0, 1, 2, 3].map(() => add('/'));
+              window.notes = add('/presenter?tab=suite');
+              const t0 = Date.now();
+              (function wait() {
+                const bar = notes.contentDocument && notes.contentDocument.querySelector('[data-room-phones]');
+                const decksUp = decks.filter((f) => f.contentDocument && f.contentDocument.querySelector('.slide.current')).length;
+                if ((bar && bar.textContent && decksUp === 4) || Date.now() - t0 > 8000) {
+                  decks.forEach((f) => { if (f.contentWindow) f.contentWindow.__before = true; });
+                  ok({ phones: bar ? bar.textContent : '', decksUp });
+                } else setTimeout(wait, 100);
+              })();
+            })\`);
+            await new Promise((ok) => setTimeout(ok, 300));
+            fs.appendFileSync(${JSON.stringify(path.join(dir, 'deck.md'))}, '\\n');
+            out.after = await b.page.evaluate(\`new Promise((ok) => {
+              const t0 = Date.now();
+              const fresh = (f) => !!(f.contentWindow && !f.contentWindow.__before && f.contentDocument.querySelector('.slide.current'));
+              /* The notes do not reload: they fetch their page again, by version. */
+              const fetched = () => notes.contentWindow.performance.getEntriesByType('resource')
+                .some((e) => /\\\\/presenter\\\\?.*[?&]v=/.test(e.name));
+              (function wait() {
+                if ((decks.every(fresh) && fetched()) || Date.now() - t0 > 8000) {
+                  ok({ decks: decks.filter(fresh).length, notes: fetched() });
+                } else setTimeout(wait, 100);
+              })();
+            })\`);
+          } finally { await b.close(); s.room.relay.close(); s.close(); if (s.closeAllConnections) s.closeAllConnections(); }
+          console.log(JSON.stringify(out));
+          process.exit(0);
+        })().catch((e) => { console.log(JSON.stringify({ error: e.message })); process.exit(0); });
+      `;
+      const run = require('child_process').spawnSync('node', ['-e', probe], { encoding: 'utf8', timeout: 60000 });
+      fs.rmSync(dir, { recursive: true, force: true });
+      eq(run.status, 0, `the probe ran (${run.stderr.trim().split('\n')[0]})`);
+      const out = JSON.parse(run.stdout.trim().split('\n').pop());
+      if (out.error) throw new Error(out.error);
+      eq(out.before.decksUp, 4, 'all four deck windows load');
+      if (!/^\d+ phones?$/.test(out.before.phones)) throw new Error(`the notes' header says "${out.before.phones}", not the room's phones`);
+      eq(out.after.decks, 4, 'a save reloads every deck window');
+      eq(out.after.notes, true, 'and reaches the notes, which fetch the new version');
     });
   }
 }
@@ -4029,7 +4159,7 @@ check('over the network a deck window that does not hold the room cannot make a 
       const deck = s.address().port;
       const post = (body) => fetch('http://127.0.0.1:' + deck + '/audience/deck', { method: 'POST',
         headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
-      const open = (id) => new Promise((ok) => http.get({ host: '127.0.0.1', port: deck, path: '/audience/stream?deck=' + id }, (r) => {
+      const open = (id) => new Promise((ok) => http.get({ host: '127.0.0.1', port: deck, path: '/events?deck=' + id }, (r) => {
         r.once('data', () => ok(r));
       }));
       const phone = async (p) => (await fetch('http://127.0.0.1:' + s.room.port + p)).status;
@@ -4092,20 +4222,18 @@ function hubWindow(body, scripts, hub, { bus = makeBus(), url = 'http://localhos
         : u.startsWith('/remote/command') ? hub.fromDevice(msg) : { status: 404, body: {} };
       return Promise.resolve({ ok: r.status === 200, status: r.status, json: () => Promise.resolve(r.body) });
     };
-    w.EventSource = function (u) {
-      this.url = u;
-      this.readyState = 1;
-      this.close = () => { if (this.off) this.off(); this.readyState = 2; };
-      streams.push(this);
-    };
+    w.EventSource = fakeStream(streams);
   });
+  /* A page's one stream, wired as the server wires it: a deck window's
+     half of the channel by the id it asks with, a device's by its key. */
   const connect = () => streams.forEach((es) => {
     if (es.off || es.readyState === 2) return;
-    const deliver = (event) => { if (es.onmessage) es.onmessage({ data: JSON.stringify(event) }); };
-    if (es.url.startsWith('/remote/window')) {
-      es.off = hub.onWindow(new URL(es.url, 'http://x').searchParams.get('window'), deliver);
-    } else if (es.url.startsWith('/remote/stream')) {
-      es.off = hub.onDevice(deliver, () => { es.off(); es.readyState = 2; });
+    const deliver = (event) => es.emit('remote', event);
+    const q = new URL(es.url, 'http://x').searchParams;
+    if (q.get('window')) {
+      es.off = hub.onWindow(q.get('window'), deliver);
+    } else if (q.has('key')) {
+      es.off = hub.onDevice(deliver, () => es.close());
     }
   });
   connect();
@@ -4289,14 +4417,14 @@ check('in the browser, the device moves the deck that holds the room, by key or 
   /* The deck goes: the device says so, a moment later, and keeps the
      last slide it showed. */
   const kept = script();
-  two.streams.filter((es) => es.url.startsWith('/remote/window')).forEach((es) => es.close());
+  two.streams.filter((es) => /[?&]window=/.test(es.url)).forEach((es) => es.close());
   device.timers.filter((x) => x.ms === 3000).forEach((x) => x.fn());
   const status = doc.getElementById('remote-status').textContent;
   if (!/has gone/.test(status)) throw new Error(`the device says: "${status}"`);
   eq(script(), kept, 'and keeps the last slide');
 
   /* A new link: the stream is ended, the browser's retry refused. */
-  const es = device.streams.find((s) => s.url.startsWith('/remote/stream'));
+  const es = device.streams.find((s) => /[?&]key=/.test(s.url));
   hub.rotate();
   eq(doc.body.classList.contains('cut'), true, 'a device whose link was replaced is told, and says it is cut off');
   eq(es.readyState, 2, 'its stream ended');
@@ -4380,16 +4508,19 @@ check('the link is shown in the notes on this machine alone, asked for when open
       q.on('error', (e) => ok({ status: 0, body: e.message }));
       q.end(JSON.stringify(body));
     });
-    /* A stream's events as they arrive, and whether the server ended it. */
-    const events = (host, port, p) => {
+    /* A stream's events of one name as they arrive, those with no name
+       when none is given, and whether the server ended it. */
+    const events = (host, port, p, name = 'message', headers = {}) => {
       const got = []; let ended = false; let status = 0;
-      const q = http.get({ host, port, path: p }, (r) => {
+      const q = http.get({ host, port, path: p, headers }, (r) => {
         status = r.statusCode; r.setEncoding('utf8'); let buf = '';
         r.on('data', (c) => {
           buf += c;
           for (let i = buf.indexOf('\\n\\n'); i > -1; i = buf.indexOf('\\n\\n')) {
-            const m = /^data: (.*)$/m.exec(buf.slice(0, i)); buf = buf.slice(i + 2);
-            if (m) got.push(JSON.parse(m[1]));
+            const block = buf.slice(0, i); buf = buf.slice(i + 2);
+            const kind = (/^event: (.*)$/m.exec(block) || [])[1] || 'message';
+            const m = /^data: (.*)$/m.exec(block);
+            if (m && kind === name) got.push(JSON.parse(m[1]));
           }
         });
         r.on('end', () => { ended = true; });
@@ -4429,7 +4560,7 @@ check('the link is shown in the notes on this machine alone, asked for when open
                         cookie: (await get(LAN, R, '/css/presenter.css', { cookie: jar })).status,
                         image: (await get(LAN, R, '/images/one-piece.svg', { cookie: jar })).status };
           out.noKeyAnywhere = {};
-          for (const p of ['/', '/js/presenter.js', '/deck.css', '/reload', '/remote/stream', '/images/one-piece.svg']) {
+          for (const p of ['/', '/js/presenter.js', '/deck.css', '/events', '/images/one-piece.svg']) {
             out.noKeyAnywhere[p] = (await get(LAN, R, p)).status;
           }
           out.noKeyPost = (await req(LAN, R, '/remote/command', { type: 'next' })).status;
@@ -4451,11 +4582,22 @@ check('the link is shown in the notes on this machine alone, asked for when open
             if ((await get(host, D, p)).body.includes(key)) out.keyIn.push(host + p);
           }
 
-          /* Two deck windows on this machine, and a device. */
-          const a = events('127.0.0.1', D, '/remote/window?window=win-a');
+          /* A deck window's half of the channel is this machine's alone,
+             asked for by name: from the network, or by a page that reached
+             loopback by another name, the stream is answered without it,
+             and neither can take the device before a window of this
+             machine's has. */
+          const lanWin = events(LAN, D, '/events?window=win-lan', 'remote');
+          const rebound = events('127.0.0.1', D, '/events?window=win-rebound', 'remote', { host: 'rebound.example:' + D });
           await wait(80);
-          const b = events('127.0.0.1', D, '/remote/window?window=win-b');
-          const dev = events(LAN, R, '/remote/stream?key=' + key);
+          out.strangers = { holder: s.remote.hub.holder(), heard: lanWin.got.length + rebound.got.length,
+                            open: lanWin.status() + ' ' + rebound.status() };
+
+          /* Two deck windows on this machine, and a device. */
+          const a = events('127.0.0.1', D, '/events?window=win-a', 'remote');
+          await wait(80);
+          const b = events('127.0.0.1', D, '/events?window=win-b', 'remote');
+          const dev = events(LAN, R, '/events?key=' + key, 'remote');
           await wait(120);
           await req('127.0.0.1', D, '/remote/window', { type: 'state', window: 'win-a', channel: 'c', g: 1, s: 0, y: 0 });
           await req('127.0.0.1', D, '/remote/window', { type: 'state', window: 'win-b', channel: 'c', g: 2, s: 1, y: 0 });
@@ -4481,11 +4623,11 @@ check('the link is shown in the notes on this machine alone, asked for when open
           out.fresh = fresh !== key && fresh.length === key.length;
           out.old = { page: (await get(LAN, R, '/presenter?key=' + key)).status,
                       cookie: (await get(LAN, R, '/css/presenter.css', { cookie: jar })).status,
-                      stream: (await get(LAN, R, '/remote/stream?key=' + key)).status,
+                      stream: (await get(LAN, R, '/events?key=' + key)).status,
                       command: (await req(LAN, R, '/remote/command?key=' + key, { type: 'next' })).status };
           out.fresh = { same: !out.fresh, page: (await get(LAN, R, '/presenter?key=' + fresh)).status };
           out.keyWas = key;
-          a.close(); b.close();
+          a.close(); b.close(); lanWin.close(); rebound.close();
           console.log(JSON.stringify(out));
           s.close(); process.exit(0);
         })();
@@ -4512,6 +4654,8 @@ check('the link is shown in the notes on this machine alone, asked for when open
       eq(out.deckRotate, 404, 'and no one on the network can make a new link');
       eq(out.deckWindowPost, 404, 'nor speak for a deck window');
       eq(out.rebound, 404, 'nor a page that reached this machine by another name');
+      eq(out.strangers.open, '200 200', "the deck's stream answers them, for its reload");
+      eq(`${out.strangers.holder} ${out.strangers.heard}`, 'null 0', "but without a deck window's half of the channel");
       if (!out.link.startsWith(`http://`) || !out.link.endsWith(`/presenter?key=${out.keyWas}`)) throw new Error(`the link is ${out.link}`);
       eq(out.keyIn.join(' '), '', "the key is in no page the server sends, the laptop's included");
       eq(out.followed.join(' '), 'win-a:1', 'the device follows the window that holds the room, and not the other');
@@ -4541,16 +4685,16 @@ check('the link is shown in the notes on this machine alone, asked for when open
           out.none = (await get(LAN, R, '/presenter')).status;
           /* The room's counts, asked for through the notes' listener as a
              deck window would ask: it must not take the room. */
-          const counts = events(LAN, R, '/audience/stream?deck=win-z&key=' + key);
+          const counts = events(LAN, R, '/events?deck=win-z&key=' + key, 'tally');
           await wait(100);
           out.counts = counts.got.length && counts.got[0].type;
           out.heldAfterCounts = s.room.relay.holding();
-          const roomB = events('127.0.0.1', D, '/audience/stream?deck=win-b');
+          /* Two deck windows, each on its one stream as its page asks:
+             the room as a deck window, and its half of the channel. */
+          const b = events('127.0.0.1', D, '/events?deck=win-b&window=win-b', 'remote');
           await wait(80);
-          const roomA = events('127.0.0.1', D, '/audience/stream?deck=win-a');
-          const a = events('127.0.0.1', D, '/remote/window?window=win-a');
-          const b = events('127.0.0.1', D, '/remote/window?window=win-b');
-          const dev = events(LAN, R, '/remote/stream?key=' + key);
+          const a = events('127.0.0.1', D, '/events?deck=win-a&window=win-a', 'remote');
+          const dev = events(LAN, R, '/events?key=' + key, 'remote');
           await wait(120);
           out.holder = s.remote.hub.holder();
           out.claimHere = JSON.parse((await req('127.0.0.1', D, '/remote/window', { type: 'claim', window: 'win-a' })).body).ignored;
@@ -4571,12 +4715,12 @@ check('the link is shown in the notes on this machine alone, asked for when open
           out.statuses = [await look(LAN, P, '/'), await look(LAN, P, '/phone.js'), await look(LAN, P, '/slide/1-a-slide-of-every-template/0'),
                           await look('127.0.0.1', D, '/'), await look('127.0.0.1', D, '/presenter'), await look(LAN, P, '/presenter')];
           const stage = events(LAN, P, '/stream');
-          const tally = events('127.0.0.1', D, '/audience/stream');
+          const tally = events('127.0.0.1', D, '/events?of=', 'tally');
           await wait(120);
           if (JSON.stringify(stage.got).includes(key)) seen.push('phone stream');
           if (JSON.stringify(tally.got).includes(key)) seen.push('tally stream');
           out.seen = seen;
-          for (const x of [counts, roomA, roomB, a, b, dev, stage, tally]) x.close();
+          for (const x of [counts, a, b, dev, stage, tally]) x.close();
           console.log(JSON.stringify(out));
           s.room.relay.close(); s.close(); process.exit(0);
         })();
@@ -5847,7 +5991,7 @@ check('the server serves the pages and the sheets, and not the templates', () =>
     const raw = (p) => new Promise((ok) => http.get({ port, path: p }, (r) => {
       r.resume(); ok(r.statusCode);
     }));
-    const firstEvent = () => new Promise((ok) => http.get({ port, path: '/reload' }, (r) => {
+    const firstEvent = () => new Promise((ok) => http.get({ port, path: '/events' }, (r) => {
       r.once('data', (c) => { ok({ type: r.headers['content-type'], chunk: String(c) }); r.destroy(); });
     }));
     (async () => {
@@ -5901,7 +6045,7 @@ check('the server serves the pages and the sheets, and not the templates', () =>
   eq(out.escaped, 404, 'an encoded ../ does not leave the mount');
   eq(out.dotdot, 404, 'a literal ../ does not leave the mount');
   eq(out.reload.type, 'text/event-stream', 'the reload stream is one');
-  if (!/^data: \d+\n\n$/.test(out.reload.chunk)) {
+  if (!/^event: reload\ndata: \d+\n\n$/.test(out.reload.chunk)) {
     throw new Error(`the first reload event is ${JSON.stringify(out.reload.chunk)}`);
   }
 });
@@ -6029,7 +6173,7 @@ check('the server notices a save that replaces the file, not only one that rewri
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
     (async () => {
       await new Promise((ok) => (s.listening ? ok() : s.once('listening', ok)));
-      require('http').get({ port: s.address().port, path: '/reload' }, (r) => {
+      require('http').get({ port: s.address().port, path: '/events' }, (r) => {
         r.on('data', (c) => events.push(String(c)));
       });
       await wait(400);
@@ -6087,13 +6231,14 @@ check('the error page reloads on a change, not on the token it connects with', (
   const { errorPage } = require('./lib/pages.js');
   const html = errorPage(new Error('a fault'));
   const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
-  let onmessage = null, reloads = 0;
+  let onmessage = null, url = '', reloads = 0;
   const window = {
-    EventSource: function () { const es = this; Object.defineProperty(es, 'onmessage', { set(f) { onmessage = f; } }); },
+    EventSource: function (u) { url = u; this.addEventListener = (name, f) => { if (name === 'reload') onmessage = f; }; },
     location: { reload() { reloads++; } },
   };
   new Function('EventSource', 'location', script)(window.EventSource, window.location);
-  if (!onmessage) throw new Error('the page did not listen to the stream');
+  eq(url, '/events', 'the page listens on the one stream every page has');
+  if (!onmessage) throw new Error('the page did not listen for a reload');
   onmessage({ data: '100' });
   eq(reloads, 0, 'the token it connected with is not a change');
   onmessage({ data: '100' });
@@ -6121,8 +6266,8 @@ check('the notes page says which version it is, and an earlier one can be asked 
       /* The room opens first, and only the deck page is served before the
          save; the notes come later and ask for what the room is seeing. */
       await get('/');
-      const v1 = await new Promise((ok) => require('http').get({ port, path: '/reload' }, (r) => {
-        r.once('data', (c) => { ok(String(c).replace(/^data: /, '').trim()); r.destroy(); });
+      const v1 = await new Promise((ok) => require('http').get({ port, path: '/events' }, (r) => {
+        r.once('data', (c) => { ok(/data: (\\d+)/.exec(String(c))[1]); r.destroy(); });
       }));
       const deck = path.join(dir, 'deck.md');
       const f = String.fromCharCode(96).repeat(3);           // a fence, kept out of this template

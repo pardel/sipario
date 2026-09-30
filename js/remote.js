@@ -15,7 +15,9 @@
  *            the deck or the link has gone
  *
  * Loaded only where the server put it, so a page that has no part in
- * this makes no request of any kind for it.
+ * this makes no request of any kind for it. What the server says to a
+ * deck window or a device comes as `remote` events on the page's one
+ * stream (js/events.js).
  */
 (function () {
   "use strict";
@@ -53,7 +55,8 @@
    * unless it is that one. */
   function deckWindow() {
     var ID = deck.getAttribute("data-deck") || "";
-    if (!window.BroadcastChannel || !window.EventSource || !window.fetch) return;
+    var events = window.siparioEvents;
+    if (!window.BroadcastChannel || !window.EventSource || !window.fetch || !events) return;
     var bus = new BroadcastChannel(ID);
     function tab() { return deck.getAttribute("data-window") || ""; }
     function say(m) {
@@ -82,23 +85,19 @@
       }
     };
 
-    var es = null;
-    function listen() {
-      if (es) es.close();
-      es = new window.EventSource("/remote/window?window=" + encodeURIComponent(tab()));
-      es.onmessage = function (ev) {
-        var e;
-        try { e = JSON.parse(ev.data); } catch (x) { return; }
-        var m = e && e.msg;
-        if (!m || typeof m.type !== "string") return;
-        if (m.type === "clock") clock = { msg: m, at: Date.now() };
-        bus.postMessage(copy(m, { from: "presenter", tab: tab() }));
-      };
-    }
+    /* This window's half of the channel, asked for by its id. */
+    events.ask(function () { return { window: tab() }; });
+    events.on("remote", function (data) {
+      var e;
+      try { e = JSON.parse(data); } catch (x) { return; }
+      var m = e && e.msg;
+      if (!m || typeof m.type !== "string") return;
+      if (m.type === "clock") clock = { msg: m, at: Date.now() };
+      bus.postMessage(copy(m, { from: "presenter", tab: tab() }));
+    });
     /* Asked as its notes ask, so the deck says where it is now. */
     function hello() { bus.postMessage({ from: "presenter", type: "hello", tab: tab() }); }
 
-    listen();
     hello();
     /* The same two acts that take the room take a device's commands. */
     deck.addEventListener("claimroom", function () { say({ type: "claim" }); });
@@ -106,12 +105,11 @@
       if (document.fullscreenElement) say({ type: "claim" });
     });
     /* A duplicated tab given an id of its own is a new window here too. */
-    deck.addEventListener("windowchange", function () { listen(); hello(); });
+    deck.addEventListener("windowchange", function () { events.again(); hello(); });
     /* A page put away in the back-forward cache is not there to be
-       driven, though the browser may keep its connection open; it lets
-       go, and takes it up again if it comes back. */
-    window.addEventListener("pagehide", function () { if (es) es.close(); });
-    window.addEventListener("pageshow", function (ev) { if (ev.persisted) { listen(); hello(); } });
+       driven; its stream lets go (js/events.js), and takes it up again if
+       it comes back, when the deck is asked where it is. */
+    window.addEventListener("pageshow", function (ev) { if (ev.persisted) hello(); });
   }
 
   /* ---- the notes, on this machine
@@ -166,11 +164,12 @@
   /* ---- the notes, elsewhere
    *
    * The page came with the key in its address, and asks the server with
-   * it for everything after: the stream of where the deck is, and each
-   * command. */
+   * it for everything after: the page's stream, which on this listener
+   * carries where the deck is, and each command. */
   function device() {
     var q = (/[?&]key=([^&#]*)/.exec(location.search) || [])[1] || "";
     var KEY = "?key=" + q;
+    var events = window.siparioEvents;
     var channels = [];
     var elStatus = document.getElementById("remote-status");
     var cut = false;
@@ -178,11 +177,11 @@
     function status(text) { if (elStatus) { elStatus.textContent = text; elStatus.title = text; } }
 
     /* The link was replaced on the laptop, or serve started again with a
-       new one: nothing more is shown or sent. */
+       new one: nothing more is shown or sent. The server has ended the
+       stream, and refuses it when the browser asks again. */
     function revoked() {
       if (cut) return;
       cut = true;
-      if (es) es.close();
       document.body.classList.add("cut");
       status("This link no longer works. Open the new one from the notes on the laptop.");
     }
@@ -218,12 +217,11 @@
       }, 3000);
     }
 
-    var es = null;
-    if (window.EventSource) {
-      es = new window.EventSource("/remote/stream" + KEY);
-      es.onmessage = function (ev) {
+    if (window.EventSource && events) {
+      events.ask(function () { return { key: q }; });
+      events.on("remote", function (data) {
         var e;
-        try { e = JSON.parse(ev.data); } catch (x) { return; }
+        try { e = JSON.parse(data); } catch (x) { return; }
         if (!e) return;
         if (e.type === "live") { deckThere(!!e.live); return; }
         if (e.type === "cut") { revoked(); return; }
@@ -232,13 +230,13 @@
           if (e.channel && ch.name !== e.channel) return;
           if (ch.onmessage) ch.onmessage({ data: e.msg });
         });
-      };
+      });
       /* A dropped connection is retried by the browser. A refused one is
          not, and a refusal is the link being gone. */
-      es.onerror = function () {
-        if (es.readyState === 2) revoked();
+      events.on("error", function (refused) {
+        if (refused) revoked();
         else if (!cut) status("Lost the laptop. Trying again…");
-      };
+      });
     }
 
     document.querySelectorAll("#remote-controls [data-command]").forEach(function (b) {
