@@ -4,7 +4,7 @@ Newest first, one line per thing somebody using sipario would notice.
 Every break is stated as a break: before 1.0 there is no major to spend,
 so a break ships as a minor and this file is the whole of the warning.
 
-## Unreleased
+## 0.6.0 — 2026-10-01
 
 - **Added:** `SIPARIO_JOIN_URL` (or `joinUrl` to `serve()`), the whole
   address phones join at, for a tunnel from a public name to the phones'
