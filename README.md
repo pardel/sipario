@@ -2,6 +2,53 @@
 
 A conference talk as one markdown file, rendered in the browser.
 
+## Quick start
+
+```bash
+mkdir my-talk && cd my-talk
+npm init -y && npm install sipario
+npx sipario new                # a talk in ./talk: deck.md, deck.css, templates/
+npx sipario serve              # http://localhost:9999, reloads on every save
+```
+
+1. Open `http://localhost:9999` and move with the arrow keys:
+   <kbd>→</kbd> <kbd>←</kbd> by movement, <kbd>↓</kbd> <kbd>↑</kbd> by slide
+   and step.
+2. Edit `talk/deck.md`. `# ` opens a movement, `## 1.2 A title` a slide,
+   `--` the next step of a build, and a ` ```notes ` block is your script.
+3. Press <kbd>N</kbd> for the notes beside the deck, <kbd>D</kbd> to give
+   them a window of their own, <kbd>F</kbd> for full screen.
+4. The starter already opens the room: phones scan the code on the title
+   slide to react, set the pace and answer polls. Delete `audience: local`
+   from the deck's head to go without.
+5. Phones on mobile data, or on a Wi-Fi that keeps its clients apart,
+   cannot reach your laptop. A Cloudflare Tunnel gives the phones' port,
+   one above the deck's, a public `https://` name. Start the tunnel first,
+   then `serve` with its address:
+
+   ```bash
+   # no account: a random https://….trycloudflare.com address each run
+   cloudflared tunnel --url http://localhost:10000
+
+   # or a name of your own, on a domain in your Cloudflare account, once:
+   cloudflared tunnel login
+   cloudflared tunnel create sipario-room
+   cloudflared tunnel route dns sipario-room room.example.com
+   # and then for each talk:
+   cloudflared tunnel run --url http://localhost:10000 sipario-room
+
+   # then serve, with the address the tunnel printed or the name you routed
+   SIPARIO_JOIN_URL=https://room.example.com npx sipario serve
+   ```
+
+   A `~/.cloudflared/config.yml` with ingress rules overrides `--url`; if
+   you keep one, point its rule at the phones' port instead. Only the
+   phones' port goes through it: the deck, with your notes and
+   its controls, stays on your machine. The laptop still needs the
+   internet; a phone's hotspot will do. More in
+   [Phones on another network](#in-the-room).
+6. `npx sipario export pdf` or `export pptx` for a copy to send.
+
 You write `deck.md`. A `# ` line opens a movement, a `## 3.2 A title` line
 opens a slide, `--` starts the next step of a build, and a fenced
 ` ```notes ` block is what you say over it. A server renders the file on
@@ -32,7 +79,7 @@ npx sipario serve       # http://localhost:9999
 To run what is on `main` ahead of a release, install from the repo
 instead: `npm install github:pardel/sipario`. npm treats it like a
 published package, a real folder in `node_modules` with the commit pinned
-in your lockfile, and `github:pardel/sipario#v0.1.1` pins a release.
+in your lockfile, and `github:pardel/sipario#v0.6.0` pins a release.
 
 `sipario new` copies `starters/minimal`, the shortest complete talk: one
 slide of every template it defines, and the fixture this repo's own suite
@@ -200,16 +247,29 @@ your machine alone, so the notes never reach the network, and a room that
 cannot be reached is said once in that bar while the talk carries on.
 The example's title slide shows a QR code of the address to join at, and
 each phone shows the slide on stage, at the step the room is on and never
-one further on.
+one further on. The address is this machine's on the room's network,
+chosen past VPNs and virtual bridges; `SIPARIO_JOIN_HOST` names another
+when the choice is wrong.
+
 Any number of deck windows may be open, but the room follows one: the
 first to open, until another goes full screen or is given <kbd>H</kbd>, and
 the notes say which. A second tab opened to check a slide moves nothing on
 anyone's phone.
-A venue's Wi-Fi often keeps its clients apart, and a phone on mobile data
-never reaches your laptop's network: point a tunnel (Cloudflare's
-`cloudflared`, say) at the phones' port and set
-`SIPARIO_JOIN_URL=https://room.example.com` so the code carries its
-address. Only the phones' listener goes through it, never the deck's.
+
+**Phones on another network.** A venue's Wi-Fi often keeps its clients
+apart, and a phone on mobile data never reaches your laptop's network at
+all. Point a tunnel (Cloudflare's `cloudflared`, say) from a public name
+at the phones' port, one above the deck's, and give `serve` that name:
+
+```bash
+SIPARIO_JOIN_URL=https://room.example.com npx sipario serve
+```
+
+The banner, the QR code and the address under it then carry it, and the
+banner names the port the tunnel must reach. Only the phones' listener
+goes through it, never the deck's, and the laptop still needs the
+internet; a phone's hotspot will do.
+
 `sipario results` writes what the room said as JSON and CSV. No accounts,
 no names, no addresses kept. The keys, the blocks and where results live:
 [`docs/AUTHORING.md`](docs/AUTHORING.md#the-room).
@@ -286,12 +346,16 @@ const fs = require('fs');
 const t = talk('./talk');
 const { html, deck, slides, steps } = render(fs.readFileSync(t.deck, 'utf8'), t);
 
-serve('./talk', { port: 9999 });
+serve('./talk', { port: 9999 });                  // and the room's: audiencePort, joinHost, joinUrl
 
 await exportPdf('./talk', { out: 'deck.pdf' });     // { file, pages, ... }
 await exportPptx('./talk', { out: 'deck.pptx' });   // { file, slides, ... }
 exportResults('./talk');                            // { json, csv, record, sessions }
 ```
+
+`serve` opens the room for a deck that asks for one and the notes on
+another device for every deck; `{ audience: false, remote: false }` opens
+neither, which is how the export serves a talk.
 
 `createRelay` and `paceReading` are the room's two halves as a library:
 the relay's state, and the rule that turns the phones' pace signals into
