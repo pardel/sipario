@@ -5451,7 +5451,7 @@ check('export with no format, or one it does not know, says what it takes', () =
     const { status, stderr } = require('child_process')
       .spawnSync('node', [path.join(ROOT, 'bin/sipario.js'), 'export', ...args], { encoding: 'utf8' });
     eq(status, 2, `it exited on the usage (${args.join(' ') || 'no format'})`);
-    if (!/usage: sipario export <pdf\|pptx>/.test(stderr)) throw new Error(`no usage line: ${stderr}`);
+    if (!/usage: sipario export <pdf\|pptx\|video>/.test(stderr)) throw new Error(`no usage line: ${stderr}`);
   }
 });
 
@@ -6289,6 +6289,109 @@ check('the notes page says which version it is, and an earlier one can be asked 
   eq(out.heldV, out.v1, 'the earlier version is served back by number');
   eq(out.heldEdited, false, 'as it was rendered');
 });
+
+// ------------------------------------------------------------- the video
+
+{
+  const video = require('./lib/video.js');
+  const { spawnSync } = require('child_process');
+
+  check('video: the timeline opens on the first step shown and is clamped to the audio', () => {
+    /* Said before the first press is said over the first slide; a press
+       after the recording stopped holds nothing. Either way the stills
+       add up to the audio, which is what keeps the voice on its slides. */
+    const s = video.spans([{ id: 'b', t: 2 }, { id: 'a', t: 0.5 }, { id: 'c', t: 9 }], 6);
+    eq(s.map((x) => x.id).join(' '), 'a b c', 'in time order');
+    eq(s[0].start, 0, 'the first step starts at the top of the audio');
+    eq(s[0].dur, 2, 'and runs to the next press');
+    eq(s[1].dur, 4, 'the step before a late press runs to the end of the audio');
+    eq(s[2].dur, 0, 'the late press holds nothing');
+    eq(s.reduce((a, x) => a + x.dur, 0), 6, 'the whole adds up to the audio');
+  });
+
+  check('video: the stills list names the last still twice and keeps a quote a quote', () => {
+    const list = video.concatList([{ id: 'one', dur: 1.5 }, { id: "it's", dur: 2 }], (id) => `${id}.png`);
+    const lines = list.trim().split('\n');
+    eq(lines[0], 'ffconcat version 1.0', 'the header');
+    eq(lines[1], "file 'one.png'", 'a still');
+    eq(lines[2], 'duration 1.500', 'its length');
+    eq(lines[3], "file 'it'\\''s.png'", 'a quote in a name stays inside it');
+    eq(lines[lines.length - 1], lines[3], 'the last still is named again');
+  });
+
+  check('video: no ffmpeg is an error that says how to point at one', () => {
+    let err = null;
+    try { video.findFfmpeg({ SIPARIO_FFMPEG: '/nowhere/ffmpeg' }); } catch (e) { err = e; }
+    if (!err || !/SIPARIO_FFMPEG is \/nowhere\/ffmpeg/.test(err.message)) throw new Error('a missing named binary was not refused by name');
+    err = null;
+    try { video.findFfmpeg({ PATH: '' }); } catch (e) { err = e; }
+    if (!err || !/SIPARIO_FFMPEG/.test(err.message)) throw new Error('an empty PATH did not say how to name one');
+  });
+
+  check('video: a take is read from the data folder, and its audio must sit beside it', () => {
+    const root = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-takes-'));
+    let err = null;
+    try { video.readTake('sipario:t', null, root); } catch (e) { err = e; }
+    if (!err || !/no takes/.test(err.message)) throw new Error('no takes was not said');
+    const at = (id, take) => {
+      fs.mkdirSync(path.join(root, 'takes', 't', id), { recursive: true });
+      fs.writeFileSync(path.join(root, 'takes', 't', id, 'take.json'), JSON.stringify(take));
+    };
+    at('2026-01-01T10-00-00', { audio: 'a.webm', marks: [{ id: 'x', t: 0 }] });
+    at('2026-01-02T10-00-00', { audio: '../../escape.webm', marks: [{ id: 'x', t: 0 }] });
+    eq(video.listTakes('sipario:t', root).join(' '), '2026-01-01T10-00-00 2026-01-02T10-00-00', 'oldest first');
+    eq(video.readTake('sipario:t', '2026-01-01T10-00-00', root).audioFile,
+      path.join(root, 'takes', 't', '2026-01-01T10-00-00', 'a.webm'), 'the audio resolved beside the take');
+    err = null;
+    try { video.readTake('sipario:t', null, root); } catch (e) { err = e; }
+    if (!err || !/not a file beside it/.test(err.message)) throw new Error('an audio path out of the take was not refused');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  let browser = null;
+  let ff = null;
+  try { browser = findBrowser(); } catch { /* none here */ }
+  try { ff = video.findFfmpeg(); } catch { /* none here */ }
+  const whenBoth = (name, fn) => {
+    if (browser && ff) return check(name, fn);
+    return console.log(`  --    ${name}\n        not run: ${browser ? 'no ffmpeg' : 'no browser'} on this machine`);
+  };
+
+  whenBoth('video: a take becomes an mp4 as long as its audio, and a step the deck lost is refused by name', () => {
+    /* A talk, a take of three of its steps over four seconds of tone, the
+       CLI run as a reader would. Then a step id the deck does not have. */
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-video-'));
+    const t = path.join(dir, 'talk');
+    scaffold(t);
+    const data = path.join(dir, 'data');
+    const tt = talk(t);
+    const src = fs.readFileSync(tt.deck, 'utf8');
+    const ids = require('./lib/export.js').outline(src, tt).map((s) => s.id);
+    const take = path.join(video.takesDir(require('./lib/render.js').identity(src).key, data), '2026-10-03T10-00-00');
+    fs.mkdirSync(take, { recursive: true });
+    eq(spawnSync(ff, ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4', '-c:a', 'aac',
+      path.join(take, 'audio.m4a')]).status, 0, 'the tone was made');
+    const write = (marks) => fs.writeFileSync(path.join(take, 'take.json'), JSON.stringify({ audio: 'audio.m4a', marks }));
+    write([{ id: ids[0], t: 0.2 }, { id: ids[1], t: 1.5 }, { id: ids[2], t: 3 }]);
+    const env = { ...process.env, SIPARIO_DATA: data };
+    const run = () => spawnSync('node', [path.join(ROOT, 'bin/sipario.js'), 'export', 'video', t],
+      { cwd: dir, env, encoding: 'utf8', timeout: 120000 });
+
+    const ok = run();
+    eq(ok.status, 0, `it exported (${ok.stderr.trim()})`);
+    const mp4 = path.join(dir, `${path.basename(path.dirname(take))}-2026-10-03T10-00-00.mp4`);
+    if (!fs.existsSync(mp4)) throw new Error(`no video at ${mp4}: ${ok.stdout}`);
+    const len = video.durationOf(mp4, ff);
+    if (Math.abs(len - 4) > 0.15) throw new Error(`the video runs ${len}s against 4s of audio`);
+    if (!/3 stills of 3 steps/.test(ok.stdout)) throw new Error(`it did not report its stills: ${ok.stdout}`);
+
+    write([{ id: ids[0], t: 0 }, { id: 'no-such-step', t: 1 }]);
+    const bad = run();
+    eq(bad.status, 1, 'a lost step was refused');
+    if (!/no-such-step/.test(bad.stderr)) throw new Error(`it did not name the step: ${bad.stderr.trim()}`);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+}
 
 /* And everything true of any talk, run over both this repo ships: the
    fixture, and the same deck in its theatre-bill dress, which is a talk
