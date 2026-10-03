@@ -6443,6 +6443,460 @@ check('the notes page says which version it is, and an earlier one can be asked 
   });
 }
 
+// ------------------------------------------------------------- the voice
+
+{
+  const os = require('os');
+  const { spawnSync } = require('child_process');
+  const video = require('./lib/video.js');
+  const { readWav, wavHeader } = require('./lib/wav.js');
+  const tts = require('./lib/tts.js');
+
+  /* A voice engine for the suite, run as SIPARIO_TTS would be: an
+     executable of its own, speaking the protocol, with a sine for a voice
+     whose length follows the script's, at 24 kHz for the first request
+     and every other one after, 16 kHz between, so the take is assembled
+     from clips that need converting and clips that do not. Told by its
+     environment to misbehave, after FAKE_TTS_AFTER good answers: `hang`
+     before it is ready, `junk` on stdout, `die` part way through writing
+     a clip, `error` for an answer, `stall` without one. FAKE_TTS_LOG
+     collects every request it is sent. */
+  function fakeTts() {
+    const fs = require('fs');
+    const mode = process.env.FAKE_TTS || '';
+    const after = Number(process.env.FAKE_TTS_AFTER || 0);
+    const heard = process.env.FAKE_TTS_LOG;
+    const wav = (text, rate) => {
+      const frames = Math.round(rate * 0.02 * text.length);
+      const b = Buffer.alloc(44 + frames * 2);
+      b.write('RIFF', 0); b.writeUInt32LE(36 + frames * 2, 4); b.write('WAVEfmt ', 8);
+      b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(rate, 24);
+      b.writeUInt32LE(rate * 2, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34);
+      b.write('data', 36); b.writeUInt32LE(frames * 2, 40);
+      for (let i = 0; i < frames; i++) b.writeInt16LE(Math.round(9000 * Math.sin(2 * Math.PI * 220 * i / rate)), 44 + i * 2);
+      return b;
+    };
+    process.stderr.write('fake: loading the model\n');
+    if (mode === 'hang') return setInterval(() => {}, 1000);
+    process.stdout.write(JSON.stringify({ ready: true, engine: 'fake', sr: 24000 }) + '\n');
+    let n = 0;
+    let buf = '';
+    const reply = (o) => process.stdout.write(JSON.stringify(o) + '\n');
+    const answer = (req) => {
+      if (heard) fs.appendFileSync(heard, JSON.stringify(req) + '\n');
+      const now = n >= after;
+      if (now && mode === 'junk') return process.stdout.write('generating ' + req.id + '...\n');
+      if (now && mode === 'stall') return null;
+      if (now && mode === 'error') return reply({ id: req.id, ok: false, error: 'no voice for that' });
+      if (now && mode === 'die') {
+        fs.writeFileSync(req.out, wav(req.text, 24000).subarray(0, 100));
+        process.stderr.write('fake: out of memory\n');
+        return process.exit(3);
+      }
+      fs.writeFileSync(req.out, wav(req.text, n % 2 ? 16000 : 24000));
+      n += 1;
+      return reply({ id: req.id, ok: true, out: req.out });
+    };
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (c) => {
+      buf += c;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        if (line.trim()) answer(JSON.parse(line));
+      }
+    });
+    process.stdin.on('end', () => process.exit(0));
+    return null;
+  }
+  const fakeAt = (dir) => {
+    const bin = path.join(dir, 'fake-tts');
+    fs.writeFileSync(bin, `#!${process.execPath}\n'use strict';\n(${fakeTts.toString()})();\n`);
+    fs.chmodSync(bin, 0o755);
+    return bin;
+  };
+
+  check('voice: a WAV is read by its chunks, 16-bit and float alike, and anything else is refused by name', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sipario-wav-'));
+    try {
+      /* 16-bit PCM with a LIST chunk of odd length before the data, which
+         is padded to even: read at fixed offsets, the data would be off. */
+      const list = Buffer.concat([Buffer.from('LIST'), Buffer.from([5, 0, 0, 0]), Buffer.from('INFOx'), Buffer.from([0])]);
+      const pcm = wavHeader({ rate: 22050, channels: 2, frames: 3 });
+      const body = Buffer.alloc(12);
+      const a = path.join(dir, 'a.wav');
+      fs.writeFileSync(a, Buffer.concat([pcm.subarray(0, 36), list, pcm.subarray(36), body]));
+      const ra = readWav(a);
+      eq(`${ra.format} ${ra.rate} ${ra.channels} ${ra.bits} ${ra.frames}`, 'pcm 22050 2 16 3', 'the 16-bit header');
+      eq(ra.dataOffset, 36 + list.length + 8, 'the data found past the padded chunk');
+      eq(ra.seconds, 3 / 22050, 'its length, exactly');
+      /* IEEE float, as extensible with a fact chunk, mono at 24 kHz. */
+      const fmt = Buffer.alloc(40);
+      fmt.writeUInt16LE(0xfffe, 0); fmt.writeUInt16LE(1, 2); fmt.writeUInt32LE(24000, 4); fmt.writeUInt32LE(96000, 8);
+      fmt.writeUInt16LE(4, 12); fmt.writeUInt16LE(32, 14); fmt.writeUInt16LE(22, 16); fmt.writeUInt16LE(3, 24);
+      const chunk = (id, b) => { const h = Buffer.alloc(8); h.write(id, 0, 'latin1'); h.writeUInt32LE(b.length, 4); return Buffer.concat([h, b]); };
+      const fact = Buffer.alloc(4); fact.writeUInt32LE(5, 0);
+      const inner = Buffer.concat([Buffer.from('WAVE'), chunk('fmt ', fmt), chunk('fact', fact), chunk('data', Buffer.alloc(20))]);
+      const riff = Buffer.alloc(8); riff.write('RIFF', 0, 'latin1'); riff.writeUInt32LE(inner.length, 4);
+      const b = path.join(dir, 'b.wav');
+      fs.writeFileSync(b, Buffer.concat([riff, inner]));
+      const rb = readWav(b);
+      eq(`${rb.format} ${rb.rate} ${rb.channels} ${rb.bits} ${rb.frames}`, 'float 24000 1 32 5', 'the float header');
+      const refused = (file, re, what) => {
+        let err = null;
+        try { readWav(file); } catch (e) { err = e; }
+        if (!err || !re.test(err.message)) throw new Error(`${what}: ${err ? err.message : 'read as a WAV'}`);
+      };
+      const txt = path.join(dir, 'notes.wav');
+      fs.writeFileSync(txt, 'This is a script, not a sound.');
+      refused(txt, /notes\.wav is not a WAV file: it begins "This"/, 'a text file was not refused by name');
+      /* What an engine killed mid-write leaves: a header that promises
+         more than arrived, or a data chunk stopped mid-frame. */
+      const cut = path.join(dir, 'cut.wav');
+      fs.writeFileSync(cut, Buffer.concat([wavHeader({ rate: 24000, frames: 100 }), Buffer.alloc(50)]));
+      refused(cut, /cut short: its data chunk promises 200 bytes and the file holds 50/, 'a cut-short clip passed');
+      const odd = path.join(dir, 'odd.wav');
+      const h = wavHeader({ rate: 24000, frames: 2 });
+      h.writeUInt32LE(3, 40);
+      fs.writeFileSync(odd, Buffer.concat([h, Buffer.alloc(3)]));
+      refused(odd, /part way through a frame/, 'a clip ending mid-frame passed');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  check('voice: SIPARIO_TTS unset says how to set one up, and one that is not a file is refused by name', () => {
+    let err = null;
+    try { tts.findTts({ PATH: process.env.PATH }); } catch (e) { err = e; }
+    if (!err || !/set SIPARIO_TTS/.test(err.message) || !/docs\/VOICE\.md/.test(err.message)) {
+      throw new Error(`unset, it said ${err && err.message}`);
+    }
+    err = null;
+    try { tts.findTts({ SIPARIO_TTS: '/nowhere/sipario-tts', PATH: '' }); } catch (e) { err = e; }
+    if (!err || !/SIPARIO_TTS is \/nowhere\/sipario-tts, which is not a file here/.test(err.message)) {
+      throw new Error(`a missing engine was not refused by name: ${err && err.message}`);
+    }
+    eq(tts.findTts({ SIPARIO_TTS: path.basename(process.execPath), PATH: path.dirname(process.execPath) }),
+      process.execPath, 'a bare name is found on PATH');
+  });
+
+  /* The protocol, in a process of its own: the engine started, asked and
+     broken in each of the ways it can break, with short limits. Run once,
+     read by the checks below. */
+  const engineRuns = (() => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sipario-tts-'));
+    const bin = fakeAt(dir);
+    const probe = `
+      const fs = require('fs');
+      const path = require('path');
+      const tts = require(${JSON.stringify(path.join(ROOT, 'lib/tts.js'))});
+      const dir = ${JSON.stringify(dir)};
+      const bin = ${JSON.stringify(bin)};
+      const sink = { write() {} };
+      const list = (d) => fs.readdirSync(d).sort();
+      const start = (more, readyTimeout = 10000) => tts.startEngine(bin, { env: { ...process.env, ...more }, log: sink, readyTimeout });
+      const room = (name) => { const d = path.join(dir, name); fs.mkdirSync(d); return d; };
+      const req = (d, id, text) => ({ id, text, sample: path.join(dir, 'sample.wav'), out: path.join(d, id + '.wav') });
+      const caught = async (p) => { try { await p; return null; } catch (e) { return e.message; } };
+      (async () => {
+        const out = {};
+        {
+          const d = room('happy');
+          const log = path.join(dir, 'happy.log');
+          const e = await start({ FAKE_TTS_LOG: log });
+          const a = await tts.clip(e, req(d, 'one', 'Hello there.'));
+          const b = await tts.clip(e, req(d, 'two', 'And once again, a little longer.'));
+          await e.close();
+          out.happy = { ready: e.ready, a, b, files: list(d),
+                        sent: fs.readFileSync(log, 'utf8').trim().split('\\n').map((l) => JSON.parse(l)) };
+        }
+        {
+          const t0 = Date.now();
+          out.hang = { error: await caught(start({ FAKE_TTS: 'hang' }, 400)), ms: Date.now() - t0 };
+        }
+        {
+          const d = room('junk');
+          const e = await start({ FAKE_TTS: 'junk' });
+          out.junk = { error: await caught(tts.clip(e, req(d, 'one', 'Hello.'))), files: list(d) };
+          await e.close();
+        }
+        {
+          const d = room('die');
+          const e = await start({ FAKE_TTS: 'die', FAKE_TTS_AFTER: '1' });
+          await tts.clip(e, req(d, 'one', 'Hello.'));
+          out.die = { error: await caught(tts.clip(e, req(d, 'two', 'Goodbye.'))), files: list(d),
+                      after: await caught(tts.clip(e, req(d, 'three', 'Anyone?'))) };
+          await e.close();
+        }
+        {
+          const d = room('error');
+          const e = await start({ FAKE_TTS: 'error' });
+          out.error = { error: await caught(tts.clip(e, req(d, 'one', 'Hello.'))), files: list(d) };
+          await e.close();
+          out.error.closed = true;
+        }
+        {
+          const d = room('stall');
+          const e = await start({ FAKE_TTS: 'stall' });
+          out.stall = { error: await caught(tts.clip(e, req(d, 'one', 'Hello.'), { timeout: 300 })), files: list(d) };
+          await e.close();
+        }
+        console.log(JSON.stringify(out));
+      })().catch((e) => console.log(JSON.stringify({ crashed: e.stack })));
+    `;
+    const r = spawnSync(process.execPath, ['-e', probe], { encoding: 'utf8', timeout: 60000 });
+    fs.rmSync(dir, { recursive: true, force: true });
+    try {
+      const out = JSON.parse(r.stdout.trim().split('\n').pop());
+      if (out.crashed) throw new Error(out.crashed);
+      return { out, status: r.status, signal: r.signal };
+    } catch (e) {
+      return { error: `the engine probe did not report (${r.signal || r.status}): ${e.message} ${r.stderr}` };
+    }
+  })();
+  const ran = () => { if (engineRuns.error) throw new Error(engineRuns.error); return engineRuns.out; };
+
+  check('voice: the engine is started once, says it is ready, and answers each request in turn, each clip renamed into place whole', () => {
+    const o = ran().happy;
+    eq(`${o.ready.ready} ${o.ready.engine}`, 'true fake', 'the ready line, as the engine sent it');
+    eq(o.files.join(' '), 'one.wav two.wav', 'each clip at the name it was asked for, and nothing else left beside them');
+    eq(o.sent.map((q) => q.id).join(' '), 'one two', 'one request each, in order, one engine for both');
+    for (const q of o.sent) {
+      if (!/\.wav$/.test(q.out) || path.basename(q.out) === `${q.id}.wav`) {
+        throw new Error(`the engine was handed ${q.out}: a name of sipario's ending .wav, not the kept one`);
+      }
+    }
+    eq(o.a.frames, Math.round(24000 * 0.02 * 'Hello there.'.length), 'the first clip read exactly from its header');
+    eq(`${o.b.rate} ${o.b.frames}`, `16000 ${Math.round(16000 * 0.02 * 'And once again, a little longer.'.length)}`, 'and the second');
+  });
+
+  check('voice: an engine that never says it is ready is stopped at the timeout, and named', () => {
+    const o = ran().hang;
+    if (!/did not say it was ready within 0\.4s, and was stopped; it last said: fake: loading the model/.test(o.error || '')) {
+      throw new Error(`it said ${o.error}`);
+    }
+    if (o.ms > 5000) throw new Error(`it took ${o.ms}ms to give up`);
+  });
+
+  check('voice: a line on the engine\'s stdout that is not the protocol is named, and nothing is kept for it', () => {
+    const o = ran().junk;
+    if (!/wrote "generating one\.\.\." on stdout, which is not a line of the protocol/.test(o.error || '')) {
+      throw new Error(`it said ${o.error}`);
+    }
+    eq(o.files.length, 0, 'no clip and no name handed out left behind');
+  });
+
+  check('voice: an engine that dies mid-clip is named with its exit code and last words, and leaves nothing at the kept name', () => {
+    const o = ran().die;
+    if (!/exited with code 3 while voicing two; it last said: .*fake: out of memory/.test(o.error || '')) {
+      throw new Error(`it said ${o.error}`);
+    }
+    /* The engine wrote a hundred bytes of a clip and died: at the name it
+       was handed, never at the kept one, and that name is cleared away. */
+    eq(o.files.join(' '), 'one.wav', 'the finished clip kept, the half one nowhere');
+    if (!/exited with code 3/.test(o.after || '')) throw new Error(`a request after the death was not refused: ${o.after}`);
+  });
+
+  check('voice: an error from the engine is named with its step, and a request never answered is stopped at its time', () => {
+    const o = ran();
+    eq(o.error.error, 'the voice engine could not voice one: no voice for that', 'the engine\'s own error, with the step');
+    eq(`${o.error.files.length} ${o.error.closed}`, '0 true', 'nothing kept, and the engine still closed cleanly');
+    if (!/did not answer for one within 0\.3s, and was stopped/.test(o.stall.error || '')) throw new Error(`it said ${o.stall.error}`);
+    eq(o.stall.files.length, 0, 'nothing kept for it');
+  });
+
+  /* The command, end to end: a talk, a live take of tone to clone, the
+     fake engine as SIPARIO_TTS. Needs ffmpeg, which cuts the sample. */
+  let ff = null;
+  let browser = null;
+  try { ff = video.findFfmpeg(); } catch { /* none here */ }
+  try { browser = findBrowser(); } catch { /* none here */ }
+  const whenFf = (name, fn) => (ff ? check(name, fn)
+    : console.log(`  --    ${name}\n        not run: no ffmpeg on this machine`));
+  const whenBoth = (name, fn) => (ff && browser ? check(name, fn)
+    : console.log(`  --    ${name}\n        not run: ${browser ? 'no ffmpeg' : 'no browser'} on this machine`));
+
+  /* `live` is the lavfi source of the live take's audio. One step,
+     2-the-keys, has its script taken out. */
+  function rig(live = 'sine=frequency=300:duration=14') {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sipario-voice-'));
+    const t = path.join(dir, 'talk');
+    scaffold(t);
+    const tt = talk(t);
+    const src = fs.readFileSync(tt.deck, 'utf8').replace(/(\nid: 2-the-keys\n[\s\S]*?)```notes\n[\s\S]*?\n```\n/, '$1');
+    fs.writeFileSync(tt.deck, src);
+    const steps = require('./lib/export.js').outline(src, tt);
+    const key = require('./lib/render.js').identity(src).key;
+    const data = path.join(dir, 'data');
+    const takeId = '20261003-100000-aaaa';
+    const take = path.join(video.takesDir(key, data), takeId);
+    fs.mkdirSync(take, { recursive: true });
+    const made = spawnSync(ff, ['-v', 'error', '-f', 'lavfi', '-i', live, '-c:a', 'aac', path.join(take, 'take.m4a')]);
+    if (made.status !== 0) throw new Error(`the live take's audio was not made: ${made.stderr}`);
+    fs.writeFileSync(path.join(take, 'take.json'), JSON.stringify({ version: 1, kind: 'live', audio: 'take.m4a',
+      marks: [{ id: steps[0].id, t: 0 }] }));
+    const bin = fakeAt(dir);
+    const log = path.join(dir, 'heard.log');
+    const run = (args, more = {}) => spawnSync(process.execPath, [path.join(ROOT, 'bin/sipario.js'), ...args, t],
+      { cwd: dir, encoding: 'utf8', timeout: 120000,
+        env: { ...process.env, SIPARIO_DATA: data, SIPARIO_TTS: bin, FAKE_TTS_LOG: log, ...more } });
+    const heard = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+    return { dir, t, data, key, steps, takeId, take, run, heard, log,
+             cache: path.join(data, 'voice', key.replace(/^sipario:/, '')),
+             done: () => fs.rmSync(dir, { recursive: true, force: true }) };
+  }
+
+  let voiced = null;           // the rig the first check voiced, for the export after it
+  whenFf('voice: a talk is voiced into a new take, a step with no script held for --hold and never sent, the steps exact against the WAV', () => {
+    const r = rig();
+    voiced = r;
+    const before = fs.readFileSync(path.join(r.take, 'take.json'), 'utf8');
+    const res = r.run(['voice', '--hold', '1.5']);
+    eq(res.status, 0, `it voiced (${res.stderr.trim().split('\n').pop()})`);
+    const said = /^\[voice\] take (\S+): \d+:\d\d, 22 steps, 21 voiced by fake \(21 new, 0 cached\), 1 with no script held 1\.5s, in the voice of take 20261003-100000-aaaa \(10\.0s from 0s\)$/m.exec(res.stdout);
+    if (!said) throw new Error(`it said ${res.stdout}`);
+    if (!/\[voice\] 2\/22 2-the-keys: no script, held 1\.5s/.test(res.stderr)) throw new Error(`the held step was not said: ${res.stderr}`);
+    if (!/\[voice\] 1\/22 1-a-slide-of-every-template: \d+\.\d\ds, new in/.test(res.stderr)) throw new Error(`no progress: ${res.stderr}`);
+
+    const sent = r.heard();
+    eq(sent.length, 21, 'one request a step with a script');
+    eq(sent.some((q) => q.id === '2-the-keys'), false, 'the step with no script never sent');
+    for (const q of sent) if (!q.text.trim() || !path.isAbsolute(q.sample) || !path.isAbsolute(q.out)) throw new Error(`a request ${JSON.stringify(q)}`);
+
+    const id = said[1];
+    eq(video.listTakes(r.key, r.data).join(' '), `${r.takeId} ${id}`, 'a new take, listed after the live one');
+    eq(fs.readFileSync(path.join(r.take, 'take.json'), 'utf8'), before, 'the live take untouched');
+    eq(fs.readdirSync(r.take).sort().join(' '), 'take.json take.m4a', 'and nothing written beside it');
+    const dir = path.join(video.takesDir(r.key, r.data), id);
+    eq(fs.readdirSync(dir).sort().join(' '), 'sample.wav take.json voice.wav', 'the take\'s files');
+    const k = JSON.parse(fs.readFileSync(path.join(dir, 'take.json'), 'utf8'));
+    eq(`${k.version} ${k.kind} ${k.source} ${k.audio} ${k.deck}`, `1 voiced ${r.takeId} voice.wav ${r.key}`, 'what the take is');
+    eq(k.marks.map((m) => m.id).join(' '), r.steps.map((s) => s.id).join(' '), 'every step marked, in the deck\'s order');
+    const v = k.marks[0].v;
+    if (!/^deck:[0-9a-f]{12}$/.test(v) || k.marks.some((m) => m.v !== v)) throw new Error(`the marks' version is ${v}`);
+    for (const s of r.steps) eq(k.notes[v][s.id], s.notes, `the script of ${s.id}, as a live take keeps it`);
+    eq(`${k.voice.engine} ${k.voice.ready.ready} ${k.voice.hold}`, 'fake true 1.5', 'the engine, its ready line and the hold');
+    eq(k.voice.held.join(' '), '2-the-keys', 'which step was held');
+    eq(k.voice.synthetic.join(' '), sent.map((q) => q.id).join(' '), 'which were voiced');
+    eq(`${k.voice.sample.take} ${k.voice.sample.offset} ${k.voice.sample.file}`, `${r.takeId} 0 sample.wav`, 'where the sample came from');
+    /* Ten seconds asked for; an AAC take decodes from a few milliseconds in,
+       and the length kept is the one the WAV holds. */
+    if (Math.abs(k.voice.sample.length - 10) > 0.05) throw new Error(`the sample runs ${k.voice.sample.length}s`);
+    eq(k.voice.sample.length, readWav(path.join(dir, 'sample.wav')).seconds, 'the length kept is the sample\'s own');
+
+    /* Each step's place is counted in frames: whole at 24 kHz, the held
+       one exactly 1.5s, the 24 kHz clips exactly as the engine made them,
+       and the last ending where the file does. */
+    const w = readWav(path.join(dir, 'voice.wav'));
+    eq(`${w.format} ${w.bits} ${w.channels} ${w.rate}`, 'pcm 16 1 24000', 'the take\'s audio');
+    const at = k.marks.map((m) => m.t * 24000);
+    for (const f of at) if (Math.abs(f - Math.round(f)) > 1e-6) throw new Error(`a step begins at ${f} frames`);
+    const lens = at.map((f, i) => Math.round((i + 1 < at.length ? at[i + 1] : w.frames) - f));
+    eq(lens[1], 36000, 'the held step, 1.5s to the frame');
+    sent.forEach((q, n) => {
+      if (n % 2) return;
+      const i = r.steps.findIndex((s) => s.id === q.id);
+      eq(lens[i], Math.round(24000 * 0.02 * q.text.length), `${q.id}, as long as its clip`);
+    });
+    eq(lens.reduce((a, b) => a + b, 0), w.frames, 'the steps add up to the file');
+    eq(k.length, w.frames / 24000, 'and the take says how long');
+  });
+
+  whenFf('voice: sipario takes lists a voiced take by its kind and the take it came from', () => {
+    if (!voiced) throw new Error('the take before was not voiced');
+    const res = voiced.run(['takes']);
+    eq(res.status, 0, `it listed (${res.stderr.trim()})`);
+    if (!new RegExp(`\\d{8}-\\d{6}-\\w{4}\\s+voiced from ${voiced.takeId}\\s+\\d+:\\d\\d\\s+22 steps`).test(res.stdout)) {
+      throw new Error(`it listed ${res.stdout}`);
+    }
+    if (!new RegExp(`${voiced.takeId}\\s+live`).test(res.stdout)) throw new Error(`the live take is not listed: ${res.stdout}`);
+  });
+
+  whenBoth('voice: export video of a voiced take says it is voiced, and from which take, and runs as long as its voice', () => {
+    if (!voiced) throw new Error('the take before was not voiced');
+    const res = voiced.run(['export', 'video']);
+    eq(res.status, 0, `it exported (${res.stderr.trim()})`);
+    if (!new RegExp(`from take \\S+ \\(voiced from ${voiced.takeId}\\), 22 stills of 22 steps`).test(res.stdout)) {
+      throw new Error(`it said ${res.stdout}`);
+    }
+    const mp4 = fs.readdirSync(voiced.dir).find((f) => f.endsWith('.mp4'));
+    const k = video.readTake(voiced.key, null, voiced.data);
+    const len = video.durationOf(path.join(voiced.dir, mp4), ff);
+    if (Math.abs(len - k.length) > 0.15) throw new Error(`the video runs ${len}s against ${k.length}s of voice`);
+  });
+  if (voiced) voiced.done();
+
+  whenFf('voice: an engine that dies keeps every clip it finished, leaves no take, and the next run picks up from them', () => {
+    const r = rig();
+    try {
+      const died = r.run(['voice'], { FAKE_TTS: 'die', FAKE_TTS_AFTER: '3' });
+      eq(died.status, 1, 'the run failed');
+      const fourth = r.heard()[3].id;
+      if (!new RegExp(`exited with code 3 while voicing ${fourth}; it last said: .*fake: out of memory`).test(died.stderr)) {
+        throw new Error(`it said ${died.stderr}`);
+      }
+      const kept = fs.readdirSync(r.cache).sort();
+      eq(kept.length, 3, `the three clips finished, and nothing else (${kept.join(' ')})`);
+      for (const f of kept) {
+        if (!/^[0-9a-f]{64}\.wav$/.test(f)) throw new Error(`${f} is in the cache`);
+        readWav(path.join(r.cache, f));
+      }
+      eq(video.listTakes(r.key, r.data).join(' '), r.takeId, 'no take left behind');
+      eq(fs.readdirSync(path.dirname(r.take)).length, 1, 'not even an unfinished one');
+      const first = r.heard().slice(0, 3).map((q) => q.id);
+      fs.rmSync(r.log);
+      const again = r.run(['voice']);
+      eq(again.status, 0, `it voiced the second time (${again.stderr.trim().split('\n').pop()})`);
+      if (!/21 voiced by fake \(18 new, 3 cached\)/.test(again.stdout)) throw new Error(`it said ${again.stdout}`);
+      for (const id of first) if (!new RegExp(`${id}: \\d+\\.\\d\\ds, cached`).test(again.stderr)) throw new Error(`${id} was not taken from the cache`);
+      eq(r.heard().some((q) => first.includes(q.id)), false, 'the clips kept were not asked for again');
+    } finally {
+      r.done();
+    }
+  });
+
+  whenFf('voice: the voice is never cloned from a voiced take, nor from a live take with no five seconds of speech', () => {
+    const r = rig();
+    try {
+      const fake = path.join(path.dirname(r.take), '20261003-120000-aaaa');
+      fs.mkdirSync(fake);
+      fs.copyFileSync(path.join(r.take, 'take.m4a'), path.join(fake, 'voice.m4a'));
+      fs.writeFileSync(path.join(fake, 'take.json'), JSON.stringify({ version: 1, kind: 'voiced', source: r.takeId, audio: 'voice.m4a',
+        marks: [{ id: r.steps[0].id, t: 0 }], voice: { engine: 'fake' } }));
+      const named = r.run(['voice', '--from', '20261003-120000-aaaa']);
+      eq(named.status, 1, 'a voiced take named as the sample is refused');
+      if (!/take 20261003-120000-aaaa is voiced, spoken by fake: a voice is cloned only from a live take/.test(named.stderr)) {
+        throw new Error(`it said ${named.stderr}`);
+      }
+      eq(r.heard().length, 0, 'before the engine was asked anything');
+      const latest = r.run(['voice']);
+      eq(latest.status, 0, `with a newer voiced take, it voiced (${latest.stderr.trim().split('\n').pop()})`);
+      if (!/in the voice of take 20261003-100000-aaaa/.test(latest.stdout)) throw new Error(`it cloned ${latest.stdout}`);
+      const hold = r.run(['voice', '--hold', '0']);
+      if (hold.status !== 1 || !/--hold is 0: it is the seconds a step with no script is held silent/.test(hold.stderr)) {
+        throw new Error(`a hold of 0 was not refused by name: ${hold.stderr}`);
+      }
+    } finally {
+      r.done();
+    }
+    /* Three seconds of tone, a second and a half of nothing, and again:
+       never five seconds at a stretch. */
+    const gaps = rig("sine=frequency=300:duration=13,volume='if(lt(mod(t,4.5),3),1,0)':eval=frame");
+    try {
+      const res = gaps.run(['voice']);
+      eq(res.status, 1, 'a take with no five seconds of speech is refused');
+      if (!/take 20261003-100000-aaaa has no 5s of speech to clone a voice from: its longest stretch without a pause of 1s runs [234]\.\ds, at 0:/.test(res.stderr)) {
+        throw new Error(`it said ${res.stderr}`);
+      }
+      eq(gaps.heard().length, 0, 'and the engine was never asked');
+      eq(video.listTakes(gaps.key, gaps.data).length, 1, 'no take made');
+    } finally {
+      gaps.done();
+    }
+  });
+}
+
 // ---------------------------------------------------------- the recorder
 
 {
