@@ -60,8 +60,9 @@ Every clip Chatterbox makes carries Resemble AI's
 that a detector can find in the audio, there so that synthetic speech can
 be told from a recording. Chatterbox applies it to every output and has no
 switch for it, and sipario keeps it: the take's audio is the clips joined
-end to end, never filtered. Perth's own detector found it in a clip
-re-encoded to MP3 (checked 2026-10-03); the video's AAC was not checked.
+end to end, never filtered. Perth's own detector found it in a voiced
+take's audio as read back out of the exported video's AAC, and in a clip
+re-encoded to MP3 (both checked 2026-10-03).
 A voiced take also says what it is in its own `take.json` (`kind:
 "voiced"`, and which steps are synthetic), so the take does not pass for a
 recording even to a reader without a detector.
