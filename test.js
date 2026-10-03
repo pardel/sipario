@@ -7033,6 +7033,94 @@ check('the notes page says which version it is, and an earlier one can be asked 
   });
 }
 
+{
+  /* A take made by a real browser: Chrome, headless, with its stand-in
+     microphone, recording in the notes page served by sipario, and the
+     server keeping what it sends. The deck's positions are posted on the
+     page's own channel, as a deck window on the same origin posts them.
+     The one check here that a browser's MediaRecorder, its upload and the
+     server agree on a file that decodes. */
+  let browser = null;
+  try { browser = findBrowser(); } catch { /* none here */ }
+  const name = 'recording: in a real browser, a take of three steps is recorded, uploaded and finished, and its audio decodes';
+  if (!browser) {
+    console.log(`  --    ${name}\n        not run: no browser on this machine to record with`);
+  } else {
+    check(name, () => {
+      const video = require('./lib/video.js');
+      const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-take-'));
+      const t = path.join(dir, 'talk');
+      fs.cpSync(TALK.dir, t, { recursive: true });
+      const data = path.join(dir, 'data');
+      const ids = require('./lib/export.js').outline(fs.readFileSync(path.join(t, 'deck.md'), 'utf8'), talk(t)).map((s) => s.id);
+      const probe = `
+        process.env.SIPARIO_DATA = ${JSON.stringify(data)};
+        const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+        const { launch } = require(${JSON.stringify(path.join(ROOT, 'lib/browser.js'))});
+        const up = (srv) => new Promise((ok) => (srv.listening ? ok() : srv.once('listening', ok)));
+        (async () => {
+          const s = serve(${JSON.stringify(t)}, { port: 0, log: { log(){}, warn(){}, error(){} }, audience: false, remote: false });
+          await up(s);
+          const b = await launch({ flags: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream',
+                                           '--autoplay-policy=no-user-gesture-required'] });
+          let out;
+          try {
+            await b.page.open('http://localhost:' + s.address().port + '/presenter?tab=T');
+            out = await b.page.evaluate(\`(async () => {
+              const ids = ${JSON.stringify(ids.slice(0, 3))};
+              const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+              const until = async (fn, ms) => { const t0 = Date.now(); while (!fn() && Date.now() - t0 < ms) await sleep(50); return fn(); };
+              const deck = document.getElementById('deck');
+              const ch = new BroadcastChannel(deck.dataset.deck);
+              const show = (id) => ch.postMessage({ from: 'deck', type: 'state', tab: 'T', g: 0, s: 0, y: 0,
+                v: deck.dataset.version, id, at: performance.timeOrigin + performance.now() });
+              show(ids[0]);
+              await until(() => document.body.classList.contains('live'), 3000);
+              const btn = document.getElementById('rec-btn');
+              btn.click();
+              const started = await until(() => btn.textContent === 'stop', 8000);
+              await sleep(500); show(ids[1]);
+              await sleep(500); show(ids[2]);
+              await sleep(600);
+              btn.click();
+              const kept = await until(() => btn.textContent === 'record' && /kept/.test(document.getElementById('timer-note').textContent), 10000);
+              return { started, kept, note: document.getElementById('timer-note').textContent,
+                       alert: document.getElementById('rec-alert').textContent };
+            })()\`);
+          } catch (e) { out = { error: e.message }; }
+          finally { await b.close(); s.close(); if (s.closeAllConnections) s.closeAllConnections(); }
+          console.log(JSON.stringify(out));
+          process.exit(0);
+        })().catch((e) => { console.log(JSON.stringify({ error: e.stack })); process.exit(0); });
+      `;
+      const r = require('child_process').spawnSync(process.execPath, ['-e', probe], { encoding: 'utf8', timeout: 60000 });
+      let out;
+      try { out = JSON.parse(r.stdout.trim().split('\n').pop()); } catch { out = { error: `no output (${r.status}): ${r.stderr.trim()}` }; }
+      try {
+        if (out.error) throw new Error(out.error);
+        eq(out.started, true, `the take started (${out.alert})`);
+        eq(out.kept, true, `and was kept (${out.alert || out.note})`);
+        const take = video.readTake('sipario:minimal', null, data);
+        eq(take.marks.map((m) => m.id).join(' '), ids.slice(0, 3).join(' '), 'its steps, in order');
+        const ts = take.marks.map((m) => m.t);
+        if (!(ts[0] === 0 && ts[1] > 0.3 && ts[2] - ts[1] > 0.3 && ts[2] < 2.5)) throw new Error(`the steps fall at ${ts.join(', ')}s`);
+        eq(/^audio\/webm/.test(take.mime) && take.audio === 'take.webm', true, `recorded as WebM (${take.mime})`);
+        if (!take.settings || typeof take.settings.sampleRate !== 'number') throw new Error(`no microphone settings kept: ${JSON.stringify(take.settings)}`);
+        let ff = null;
+        try { ff = video.findFfmpeg(); } catch { /* none here */ }
+        if (ff) {
+          const len = video.durationOf(take.audioFile, ff);
+          if (!(len > 1.2 && len < 3.5)) throw new Error(`the audio runs ${len}s for a take of about 1.6s`);
+        } else if (!(fs.statSync(take.audioFile).size > 1000)) {
+          throw new Error('the audio file is all but empty');
+        }
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+}
+
 /* And everything true of any talk, run over both this repo ships: the
    fixture, and the same deck in its theatre-bill dress, which is a talk
    like any other and rots like one if nothing renders it. */
