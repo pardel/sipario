@@ -6409,6 +6409,45 @@ check('the notes page says which version it is, and an earlier one can be asked 
   });
 }
 
+// ---------------------------------------------------------- the recorder
+
+{
+  check('recording: the deck says which step it shows and when it arrived, and a repeat keeps the moment', () => {
+    /* The notes mark a take from what the deck says, so the deck says the
+       step by its own id and stamps the moment it moved, in its own
+       window. Said again (a hello, the map toggled), the position keeps
+       the moment the step was first shown, or a repeat would read as a
+       press. What it said before is all still said. */
+    const bus = makeBus();
+    const w = windowFor(deckBody, [js], bus);
+    const heard = [];
+    const ear = new bus(w.document.getElementById('deck').getAttribute('data-deck'));
+    ear.onmessage = (e) => { if (e.data.type === 'state') heard.push(e.data); };
+    const key = (k) => w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: k }));
+    const before = w.performance.timeOrigin + w.performance.now();
+    key('ArrowRight');
+    const moved = heard.pop();
+    const here = w.document.querySelector('.slide.current');
+    eq(moved.id, here.id, 'the step, by its id');
+    if (!(moved.at >= before && moved.at <= w.performance.timeOrigin + w.performance.now())) {
+      throw new Error(`the moment ${moved.at} is not when the deck moved (from ${before})`);
+    }
+    for (const k of ['g', 's', 'y', 'map', 'v', 'tab']) {
+      if (!(k in moved)) throw new Error(`the position no longer says ${k}`);
+    }
+    ear.postMessage({ from: 'presenter', type: 'hello' });
+    const again = heard.pop();
+    eq(`${again.id} ${again.at}`, `${moved.id} ${moved.at}`, 'said again, the same step at the same moment');
+    key('ArrowRight');
+    const next = heard.pop();
+    if (next.id === moved.id || !(next.at >= moved.at)) throw new Error('a move did not say its own step and moment');
+    key('ArrowLeft');
+    const back = heard.pop();
+    eq(back.id, moved.id, 'back on the first step');
+    if (!(back.at >= next.at)) throw new Error('coming back to a step is a new moment, not the old one');
+  });
+}
+
 /* And everything true of any talk, run over both this repo ships: the
    fixture, and the same deck in its theatre-bill dress, which is a talk
    like any other and rots like one if nothing renders it. */

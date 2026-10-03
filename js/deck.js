@@ -200,6 +200,7 @@
     "<dt>D</dt><dd>Move the notes to their own window, or bring them back</dd>" +
     "<dt>1 / 2</dt><dd>In the notes, hide or show the current or the next slide</dd>" +
     "<dt>+ / -</dt><dd>In the notes, a bigger or a smaller script</dd>" +
+    "<dt>V</dt><dd>In the notes' own window, record a take: your voice and every step shown</dd>" +
     "<dt>O</dt><dd>Overview of every slide; the arrows move the selection</dd>" +
     "<dt>Enter</dt><dd>In the overview, show the selected slide</dd>" +
     "<dt>M</dt><dd>A map of the talk in the corner, here and in the notes, marking where you are</dd>" +
@@ -433,6 +434,21 @@
    * rest. */
   var shown = null, shownEl = null;
 
+  /* The step on screen and the moment it arrived, for a recording made in
+   * the notes (js/recorder.js). Stamped here, in the window that moved,
+   * and sent with every position: the notes hear a move a little later
+   * than it happened, and a window in the background can hear two quick
+   * presses at once, which would fold a flash into the step after it. The
+   * id is this window's too, since the notes read their own copy of the
+   * deck, and in the moment after a save that copy can be a draft behind.
+   *
+   * Taken only when the step changes, so a position said again (a hello,
+   * the map toggled, the first token) carries the moment the step was
+   * first shown, not the moment it was repeated. A clock on the page's
+   * own origin, so a stamp from here and an anchor taken in the notes are
+   * read against one time. */
+  var stepId = null, stepAt = null;
+
   /* The slide being left stays on screen for the length of the run and
    * goes out the opposite side, then is put away. animationend is what
    * normally ends it; the timer is for a page where no animation runs,
@@ -470,6 +486,10 @@
     });
     if (enter && shownEl && shownEl !== here) leave(shownEl, enter);
     shownEl = here;
+    if (here.id !== stepId) {
+      stepId = here.id;
+      stepAt = performance.timeOrigin + performance.now();
+    }
     slides.forEach(function (el) { el.classList.toggle("current", el === here); });
     /* Progress runs over steps, so every press of space moves it. */
     bar.style.width = ((index() + 1) / slides.length * 100) + "%";
@@ -683,7 +703,8 @@
        token, so the notes can wait for it rather than run ahead: a deck in
        fullscreen holds a save back, and its notes must hold it back too. */
     if (bus) bus.postMessage({ from: "deck", type: "state", tab: TAB, g: g, s: s, y: y,
-                               map: document.body.classList.contains("minimap"), v: token });
+                               map: document.body.classList.contains("minimap"), v: token,
+                               id: stepId, at: stepAt });
   }
 
   /* The notes show either docked beside the deck or in a window of their
@@ -980,6 +1001,18 @@
     else if (k === "1" || k === "2" || k === "+" || k === "=" || k === "-" || k === "_") {
       if (!notesShowing()) return;
       if (bus && !detached()) bus.postMessage({ from: "deck", type: "panel", tab: TAB, key: k });
+    }
+    /* The recorder's key, forwarded whichever way the notes are showing,
+       since the hands are on this window during a take. It is not the
+       notes' own press, so the browser counts it as no gesture there: the
+       first take has to be started in the notes window itself, and the
+       notes say so if it is asked for from here first. Docked, they say
+       where recording happens instead. A detached window hears its own V
+       directly and never sees this one twice, because this window's keys
+       only fire when it has the focus. */
+    else if (k === "v" || k === "V") {
+      if (!notesShowing()) return;
+      if (bus) bus.postMessage({ from: "deck", type: "panel", tab: TAB, key: "v" });
     }
     else if (k === "?") document.body.classList.toggle("help");
     else if (k === "Escape") { document.body.classList.remove("help", "audit"); overview(false); }

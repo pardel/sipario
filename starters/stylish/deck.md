@@ -32,6 +32,7 @@ align: tight
 - (slate) `D` Move the notes to their own window, or bring them back
 - (slate) `1 / 2` In the notes, hide or show the current or the next slide
 - (slate) `+ / -` In the notes, a bigger or a smaller script
+- (slate) `V` In the notes' own window, record a take: your voice and every step shown
 - (slate) `O` Overview of every slide; the arrows move the selection
 - (slate) `Enter` In the overview, show the selected slide
 - (slate) `M` A map of the talk in the corner, here and in the notes, marking where you are
