@@ -6446,6 +6446,61 @@ check('the notes page says which version it is, and an earlier one can be asked 
     const back = heard.pop();
     eq(back.id, moved.id, 'back on the first step');
     if (!(back.at >= next.at)) throw new Error('coming back to a step is a new moment, not the old one');
+    /* Shown again where it is, which runs the whole of the deck's show
+       again: a jump from the notes to the step on screen. The clock has
+       moved on, so a moment taken again would read differently. */
+    const t0 = w.performance.now();
+    while (w.performance.now() - t0 < 2) { /* the clock moves on */ }
+    ear.postMessage({ from: 'presenter', type: 'jump', g: back.g, s: back.s, y: back.y });
+    const jumped = heard.pop();
+    eq(`${jumped.id} ${jumped.at}`, `${back.id} ${back.at}`, 'shown again where it is, the same step at the same moment');
+  });
+
+  check('recording: browsing the overview marks no step, and closing it on one marks that step once', () => {
+    /* The arrows move the selection on the map, and the room sees the
+       map, not each slide selected: the deck goes on saying the step it
+       showed before the map opened. Enter opens a build at its first
+       step, and only that step is said; closing the map with Escape says
+       the step it closed on. */
+    const bus = makeBus();
+    const w = windowFor(deckBody, [js], bus);
+    const heard = [];
+    const ear = new bus(w.document.getElementById('deck').getAttribute('data-deck'));
+    ear.onmessage = (e) => { if (e.data.type === 'state') heard.push(e.data); };
+    const key = (k) => w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: k }));
+    const tick = () => { const t0 = w.performance.now(); while (w.performance.now() - t0 < 2) { /* on */ } };
+    key('ArrowRight');
+    const shown = heard.pop();
+    heard.length = 0;
+    tick();
+    key('o');
+    key('ArrowRight');
+    key('ArrowLeft');
+    for (let i = 0; i < 6 && !(heard.length && heard[heard.length - 1].y > 0); i++) key('ArrowDown');
+    const browsing = heard.splice(0);
+    if (!browsing.length || browsing[browsing.length - 1].y === 0) throw new Error('the fixture has no build to select a later step of');
+    if (!browsing.some((m) => m.g !== shown.g)) throw new Error('the selection did not move');
+    for (const m of browsing) {
+      eq(`${m.id} ${m.at}`, `${shown.id} ${shown.at}`, 'while the map is open, the step shown before it');
+    }
+    tick();
+    key('Enter');
+    const opened = heard.splice(0);
+    const here = w.document.querySelector('.slide.current');
+    eq([...new Set(opened.map((m) => m.id))].join(' '), here.id, 'Enter says one step, the one it opened');
+    eq(opened[opened.length - 1].y, 0, 'a build opened at its first step');
+    if (!(opened[0].at > shown.at)) throw new Error('the step opened is stamped when it opened');
+    tick();
+    key('o');
+    key('ArrowLeft');
+    key('Escape');
+    const closed = heard.splice(0);
+    const there = w.document.querySelector('.slide.current') && w.document.querySelector('.stack.current-stack .slide.current');
+    const last = closed[closed.length - 1];
+    if (!last || last.id === here.id) throw new Error(`closing the map on another step did not say it: ${JSON.stringify(closed.map((m) => m.id))}`);
+    eq(last.id, there.id, 'Escape says the step the map closed on');
+    eq(closed.filter((m) => m.id !== here.id).length, 1, 'once');
+    if (!(last.at > opened[0].at)) throw new Error('stamped when the map closed');
   });
 }
 

@@ -364,11 +364,12 @@ notes' own attach, close, <kbd>D</kbd> and <kbd>N</kbd> ask before ending a
 take.
 
 Each step is marked from the deck window's own clock, the moment it moved,
-so a step shown for an instant is in the video for a frame. A save
-mid-take does not stop the take, which keeps the script each step had on
-screen, whichever draft that was. The browser's echo cancellation,
-noise suppression and gain control are turned off for it: a take is your
-voice as the microphone heard it.
+so a step shown for an instant is in the video for a frame. Moving through
+the overview marks nothing, since the room sees the map; the step it closes
+on is marked as it closes. A save mid-take does not stop the take, which
+keeps the script each step had on screen, whichever draft that was. The
+browser's echo cancellation, noise suppression and gain control are turned
+off for it: a take is your voice as the microphone heard it.
 
 The browser asks for the microphone once per address, and
 `localhost:9999` and `localhost:8080` are two, so keep the port the same

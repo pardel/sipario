@@ -353,6 +353,8 @@
     document.documentElement.classList.toggle("overview", want);
     fit();
     save();
+    /* Closed on the selection, the room sees that step now (stamp()). */
+    if (!want && stamp()) publish();
     if (want) {
       var el = at();
       if (el.scrollIntoView) el.scrollIntoView({ block: "center", inline: "center" });
@@ -421,9 +423,12 @@
    * step, because that is the only frame that shows the whole slide, but
    * choosing it should play the build rather than drop you at its end. */
   function openSlide(el) {
-    overview(false);
     var to = locate(el);
-    if (to) { g = to.g; s = to.s; y = 0; show(); } else { jump(slides.indexOf(el)); }
+    if (to) { g = to.g; s = to.s; y = 0; }
+    /* On the step it opens at, so closing the map does not first stamp
+       the build's last step, the one the map was showing. */
+    overview(false);
+    if (to) show(); else jump(slides.indexOf(el));
   }
 
   /* Where the deck was at the last show, so the next one knows which way
@@ -446,8 +451,19 @@
    * the map toggled, the first token) carries the moment the step was
    * first shown, not the moment it was repeated. A clock on the page's
    * own origin, so a stamp from here and an anchor taken in the notes are
-   * read against one time. */
+   * read against one time.
+   *
+   * Not while the overview is open: the arrows move the selection then,
+   * and the room sees the map, not the slide selected. The step stays the
+   * one shown before the map opened, until it closes on another. */
   var stepId = null, stepAt = null;
+  function stamp() {
+    var id = at().id;
+    if (id === stepId) return false;
+    stepId = id;
+    stepAt = performance.timeOrigin + performance.now();
+    return true;
+  }
 
   /* The slide being left stays on screen for the length of the run and
    * goes out the opposite side, then is put away. animationend is what
@@ -486,10 +502,9 @@
     });
     if (enter && shownEl && shownEl !== here) leave(shownEl, enter);
     shownEl = here;
-    if (here.id !== stepId) {
-      stepId = here.id;
-      stepAt = performance.timeOrigin + performance.now();
-    }
+    /* A deck opened on the map, from the saved position, still says which
+       step it is on. */
+    if (stepId === null || !document.body.classList.contains("overview")) stamp();
     slides.forEach(function (el) { el.classList.toggle("current", el === here); });
     /* Progress runs over steps, so every press of space moves it. */
     bar.style.width = ((index() + 1) / slides.length * 100) + "%";
