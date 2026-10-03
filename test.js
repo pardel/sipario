@@ -6309,6 +6309,22 @@ check('the notes page says which version it is, and an earlier one can be asked 
     eq(s.reduce((a, x) => a + x.dur, 0), 6, 'the whole adds up to the audio');
   });
 
+  check('video: every flash keeps a frame, and the stills still end where the audio does', () => {
+    /* A double press through a build shows a step for 10ms: under a frame,
+       so a frame rate would drop it silently. Kept means seen, so it gets
+       one, borrowed from the span after it. A span of no length showed
+       nothing and goes. */
+    const segs = video.segments([
+      { id: 'a', dur: 1 }, { id: 'flash', dur: 0.01 }, { id: 'gone', dur: 0 }, { id: 'b', dur: 2.99 },
+    ]);
+    eq(segs.map((s) => s.id).join(' '), 'a flash b', 'the flash is kept, the empty span is not');
+    eq(segs[1].dur, 1 / video.FPS, 'the flash holds one frame');
+    for (const s of segs) eq(Math.abs(s.dur * video.FPS - Math.round(s.dur * video.FPS)) < 1e-9, true, `${s.id} is whole frames`);
+    eq(Math.round(segs.reduce((a, s) => a + s.dur, 0) * 1000), 4000, 'the whole is still the audio');
+    const tail = video.segments([{ id: 'a', dur: 1 }, { id: 'x', dur: 0.005 }, { id: 'y', dur: 0.005 }]);
+    eq(tail.every((s) => s.dur > 0), true, 'flashes at the very end each keep a frame');
+  });
+
   check('video: the stills list names the last still twice and keeps a quote a quote', () => {
     const list = video.concatList([{ id: 'one', dur: 1.5 }, { id: "it's", dur: 2 }], (id) => `${id}.png`);
     const lines = list.trim().split('\n');
