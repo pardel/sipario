@@ -114,6 +114,7 @@ the same one.
 | `sipario export pdf [dir]` | the deck as a PDF, a page per step, at the stage's size |
 | `sipario export pptx [dir]` | the deck as PowerPoint, a picture per step, the script in its notes |
 | `sipario results [dir]` | what the room said in the latest session, as JSON and CSV in the current folder |
+| `sipario takes [dir]` | the takes recorded of the deck, oldest first; `takes recover <take>` finishes one left unfinished |
 
 `sipario-serve` and `sipario-renumber` are the same two commands under
 their own names, for the talks that already have them in their npm
@@ -206,6 +207,7 @@ template: [`docs/TEMPLATES.md`](docs/TEMPLATES.md).
 | <kbd>D</kbd> | the notes, in a window of their own, and back |
 | <kbd>1</kbd> <kbd>2</kbd> | in the notes, hide or show the current or the next slide, and give the room back to the script |
 | <kbd>+</kbd> <kbd>-</kbd> | in the notes, a bigger or a smaller script, for how far the lectern is from your eyes |
+| <kbd>V</kbd> | in the notes' own window, record a take: your voice and every step shown. The first take starts with <kbd>V</kbd> pressed there; after that <kbd>V</kbd> in the deck starts and stops one too |
 | <kbd>T</kbd> | the clock: start, pause, then reset |
 | <kbd>R</kbd> | forget where each movement was left |
 | <kbd>F</kbd> | full screen; with the notes docked, the first press moves them to a window of their own, so the script never reaches the projector, and the second goes full screen |
@@ -337,6 +339,50 @@ page short, a figure that does not load and would print as a hole, and a
 save landing mid-export, which would pair this draft's pictures with the
 last one's scripts.
 
+## Recording a talk
+
+Detach the notes (<kbd>D</kbd>), press <kbd>V</kbd> in their window, and
+give the talk. The notes record your voice and every step the deck shows,
+for as long as it shows it; <kbd>V</kbd> again stops and keeps the take.
+Then:
+
+```bash
+npx sipario export video        # ./my-talk-<take>.mp4, the deck's steps over your voice
+npx sipario takes               # the takes kept, oldest first
+```
+
+Takes are recorded in the notes' own window and nowhere else. The docked
+notes go whenever the deck reloads, which every save does, so the dock
+offers "Detach to record" instead; the notes on another device are served
+over plain http, where a browser gives a page no microphone. The first take
+starts with <kbd>V</kbd> pressed in the notes window itself, because a
+browser starts a microphone only for a press in its own window; after that
+<kbd>V</kbd> in the deck starts and stops takes as well. While a take runs,
+the notes' bar says REC, a thin meter under the clock shows the
+microphone's level, and the bar says so when no sound is arriving. The
+notes' own attach, close, <kbd>D</kbd> and <kbd>N</kbd> ask before ending a
+take.
+
+Each step is marked from the deck window's own clock, the moment it moved,
+so a step shown for an instant is in the video for a frame. A save
+mid-take does not stop the take, which keeps the script each step had on
+screen, whichever draft that was. The browser's echo cancellation,
+noise suppression and gain control are turned off for it: a take is your
+voice as the microphone heard it.
+
+The browser asks for the microphone once per address, and
+`localhost:9999` and `localhost:8080` are two, so keep the port the same
+from one run to the next. Takes live in sipario's data folder beside the
+room's sessions (`takes/<deck>/`, under `SIPARIO_DATA` when that is set),
+never in the talk: a talk folder is watched, and audio written into it
+would reload the deck every few seconds, so the server refuses a data
+folder inside it. The audio reaches the server as it is recorded, so a
+window closed mid-take, by the deck's <kbd>N</kbd> or a crash, keeps all
+but its last few seconds; `sipario takes` lists such a take as unfinished,
+and `sipario takes recover <take>` finishes it. The video is made by
+ffmpeg, borrowed from the machine like the browser (`SIPARIO_FFMPEG` names
+one PATH would miss).
+
 ## Using it as a library
 
 ```js
@@ -353,9 +399,10 @@ await exportPptx('./talk', { out: 'deck.pptx' });   // { file, slides, ... }
 exportResults('./talk');                            // { json, csv, record, sessions }
 ```
 
-`serve` opens the room for a deck that asks for one and the notes on
-another device for every deck; `{ audience: false, remote: false }` opens
-neither, which is how the export serves a talk.
+`serve` opens the room for a deck that asks for one, the notes on another
+device for every deck, and takes a recording from the notes window;
+`{ audience: false, remote: false, record: false }` does none of it, which
+is how the export serves a talk.
 
 `createRelay` and `paceReading` are the room's two halves as a library:
 the relay's state, and the rule that turns the phones' pace signals into

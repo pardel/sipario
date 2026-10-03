@@ -4,6 +4,23 @@ Newest first, one line per thing somebody using sipario would notice.
 Every break is stated as a break: before 1.0 there is no major to spend,
 so a break ships as a minor and this file is the whole of the warning.
 
+## Unreleased
+
+- **Added:** recording a talk. In the notes' own window, `V` records a
+  take: your voice and every step the deck shows, each marked from the deck
+  window's own clock, so a step shown for an instant is kept. The audio and
+  the steps reach the server as they are recorded, into sipario's data
+  folder and never the talk, so a window closed mid-take keeps all but its
+  last few seconds. The docked notes offer "Detach to record"; the notes on
+  another device do not record. `npx sipario export video` makes the video
+  from the latest take, and says which kind of take it used.
+- **Added:** `sipario takes` lists a deck's takes, oldest first, by kind,
+  length and steps; `sipario takes recover <take>` finishes one a recording
+  left unfinished.
+- **Added:** `record: false` to `serve()`, which the export passes. The
+  routes under `/record/` answer this machine alone, by a loopback name,
+  from a page of the server's own, and nothing else.
+
 ## 0.6.0 — 2026-10-01
 
 - **Added:** `SIPARIO_JOIN_URL` (or `joinUrl` to `serve()`), the whole
