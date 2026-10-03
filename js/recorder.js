@@ -153,6 +153,11 @@
   // ------------------------------------------------------- to the server
 
   var take = null;
+  /* The take this window let go of without finishing, named to the
+     server with the next start so it is set aside at once: the server
+     never hears that the notes gave up on it, and would hold the deck for
+     it until it had been quiet for half a minute. */
+  var gaveUp = null;
   var seq = 0, queue = [], sending = false;    // the slices, in order
   var sent = 0, marking = false;               // the marks the server has
   var failed = null, waiting = [];
@@ -241,7 +246,7 @@
   // ---------------------------------------------------------- the audio
 
   var ctx = null, stream = null, track = null, rec = null, source = null, meter = null;
-  var stopped = null, stopping = null;
+  var stopped = null, stopping = null, recEnded = false;
 
   /* Off, all three: a take is also the sample a voice is cloned from, and
      a voice cleaned up by the browser is a voice with its artefacts. The
@@ -340,12 +345,14 @@
       var settings = track && track.getSettings ? track.getSettings() : null;
       var mime = MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus" : "audio/mp4";
-      return post("/record/start", { mime: mime, settings: settings, v: typeof last.v === "string" ? last.v : null })
+      return post("/record/start", { mime: mime, settings: settings, v: typeof last.v === "string" ? last.v : null, gaveUp: gaveUp })
         .then(function (r) {
           take = r.take;
+          gaveUp = null;
           seq = 0; queue = []; sending = false;
           sent = 0; marking = false; failed = null;
           rec = new MediaRecorder(stream, { mimeType: mime });
+          recEnded = false;
           rec.ondataavailable = function (e) { if (e.data && e.data.size) push(e.data); };
           rec.onerror = function (e) {
             alarm("The recorder failed (" + ((e && e.error && e.error.name) || "an error") + "); the take is kept as far as it got.");
@@ -353,6 +360,7 @@
           };
           /* Stopped by the browser rather than by a press: the track went. */
           rec.onstop = function () {
+            recEnded = true;
             if (stopped) { stopped(); return; }
             if (state === "recording") stop().catch(function () { /* said */ });
           };
@@ -377,12 +385,13 @@
           paint();
           sendMarks();
           if (r.setAside) {
-            tell("The take before this one went quiet and was left unfinished: sipario takes recover " + r.setAside +
+            tell("The take before this one was left unfinished: sipario takes recover " + r.setAside +
               " finishes it.", 9000);
           }
         });
     }).catch(function (err) {
       release();
+      if (take) gaveUp = take;
       take = null;
       state = "idle";
       paint();
@@ -399,11 +408,20 @@
     state = "stopping";
     paint();
     var length = (now() - anchor) / 1000;
+    /* Stopped by its own error, the recorder is inactive already, and its
+       last slice and its stop event are still to come, in that order,
+       after the error event: finishing at once would send the finish
+       ahead of that slice, a take short of its end and a slice refused.
+       So it waits for the stop, unless the recorder has said it already;
+       and not for ever, for a browser that never says it. */
+    var waitStop = null;
     stopping = new Promise(function (ok) {
-      if (!rec || rec.state === "inactive") return ok();
+      if (!rec || recEnded) return ok();
       stopped = ok;
+      if (rec.state === "inactive") { waitStop = setTimeout(ok, 2000); return; }
       try { rec.stop(); } catch (e) { ok(); }
     }).then(function () {
+      clearTimeout(waitStop);
       stopped = null;
       release();
       return whenSettled();
@@ -417,6 +435,7 @@
       tell("Take " + r.take + " kept: " + r.marks + " steps. `npx sipario export video` makes the video.", 9000);
       return r;
     }, function (err) {
+      gaveUp = take;
       take = null;
       state = "idle";
       paint();

@@ -6931,6 +6931,10 @@ check('the notes page says which version it is, and an earlier one can be asked 
         w.Date.now = () => realNow() + clock.date;
         if (parent) w.parent = parent;
         let takes = 0;
+        /* ctl.refuse names a route the server answers 409 on. An answer is
+           logged as it arrives, as well as the request as it goes, so an
+           order can be asserted against answers too. */
+        const ctl = { refuse: null };
         w.fetch = (u, o) => {
           const body = o && o.body;
           const entry = { url: u.replace(/\\?.*$/, ''), query: u.split('?')[1] || '' };
@@ -6945,7 +6949,12 @@ check('the notes page says which version it is, and an earlier one can be asked 
             : p === '/record/finish' ? { ok: true, take: b.take, marks: 0 }
             : null;
           if (!answer) return Promise.reject(new Error('no network in a test'));
-          return wait(1).then(() => ({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(answer)) }));
+          const refused = ctl.refuse === p;
+          return wait(1).then(() => {
+            log.push({ answered: p === '/record/chunk' ? 'chunk:' + entry.slice : p });
+            return { ok: !refused, status: refused ? 409 : 200,
+                     text: () => Promise.resolve(JSON.stringify(refused ? { ok: false, error: 'refused here' } : answer)) };
+          });
         };
         const track = { stopped: 0, getSettings: () => ({ channelCount: 1, sampleRate: 48000 }), stop() { this.stopped++; } };
         Object.defineProperty(w.navigator, 'mediaDevices', { configurable: true, value: {
@@ -6958,6 +6967,13 @@ check('the notes page says which version it is, and an earlier one can be asked 
         MediaRecorder.prototype.stop = function () {
           this.state = 'inactive';
           setTimeout(() => { this.slice('last'); this.onstop(); }, 1);
+        };
+        /* An error, as the recorder raises one: inactive at once, the error
+           said, and its last slice and its stop only after. */
+        MediaRecorder.prototype.fail = function () {
+          this.state = 'inactive';
+          this.onerror({ error: { name: 'EncodingError' } });
+          setTimeout(() => { this.slice('tail'); this.onstop(); }, 1);
         };
         w.MediaRecorder = MediaRecorder;
         w.AudioContext = function () {
@@ -6973,7 +6989,7 @@ check('the notes page says which version it is, and an earlier one can be asked 
         const state = (id, at, more = {}) => deck.postMessage({ from: 'deck', type: 'state', tab: 'T', g: 0, s: 0, y: 0, v: 'v1', id, at, ...more });
         const key = (k) => w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: k }));
         const $ = (id) => w.document.getElementById(id);
-        return { w, log, errors, recorders, asked, clock, track, deck, state, key, $ };
+        return { w, log, errors, recorders, asked, clock, track, deck, state, key, $, ctl };
       }
       (async () => {
         const out = {};
@@ -7048,6 +7064,49 @@ check('the notes page says which version it is, and an earlier one can be asked 
         /* Opened by hand, for no deck window in particular: nothing. */
         const h = notes('http://localhost:9999/presenter');
         out.hand = { rec: !!h.$('rec'), errors: h.errors };
+
+        /* A third window: a take stopped by V from the deck, one whose
+           recorder fails mid-take, and one the server stops taking. */
+        const f = notes('http://localhost:9999/presenter?tab=T');
+        const seen = (l) => l.map((e) => e.answered ? 'answered ' + e.answered
+          : e.url === '/record/chunk' ? 'chunk:' + e.slice : e.url || e.bus);
+        f.state('first', 400);
+        f.clock.now = 30000;
+        f.key('V');
+        await wait(20);
+        f.recorders[0].slice('s0');
+        await wait(10);
+        f.log.length = 0;
+        f.deck.postMessage({ from: 'deck', type: 'panel', tab: 'T', key: 'v' });
+        await wait(40);
+        out.forwardedStop = { log: seen(f.log), button: f.$('rec-btn').textContent };
+
+        /* The rest needs that take stopped. */
+        if (out.forwardedStop.button === 'record') {
+          f.log.length = 0;
+          f.key('V');
+          await wait(20);
+          f.recorders[1].slice('s0');
+          await wait(10);
+          f.recorders[1].fail();
+          await wait(60);
+          out.failed = { log: seen(f.log), alert: f.$('rec-alert').textContent, note: f.$('timer-note').textContent,
+                         button: f.$('rec-btn').textContent };
+
+          f.log.length = 0;
+          f.ctl.refuse = '/record/chunk';
+          f.key('V');
+          await wait(20);
+          f.recorders[2].slice('s0');
+          await wait(60);
+          f.ctl.refuse = null;
+          out.lost = { alert: f.$('rec-alert').textContent, button: f.$('rec-btn').textContent };
+          f.key('V');
+          await wait(20);
+          out.lost.starts = f.log.filter((e) => e.url === '/record/start').map((e) => e.body.gaveUp);
+          out.lost.button2 = f.$('rec-btn').textContent;
+        }
+        out.thirdErrors = f.errors;
         console.log(JSON.stringify(out));
         process.exit(0);
       })().catch((e) => { console.log(JSON.stringify({ error: e.stack })); process.exit(0); });
@@ -7093,10 +7152,16 @@ check('the notes page says which version it is, and an earlier one can be asked 
 
   check('recording: slices go in order as they come, and the take is finished only after the last of them', () => {
     const o = notesOut();
-    const seen = o.first.log.map((e) => (e.url === '/record/chunk' ? `chunk:${e.slice}:${e.query.split('seq=')[1]}` : e.url));
+    const seen = o.first.log.filter((e) => !e.answered)
+      .map((e) => (e.url === '/record/chunk' ? `chunk:${e.slice}:${e.query.split('seq=')[1]}` : e.url));
     const chunks = seen.filter((x) => x.startsWith('chunk:'));
     eq(chunks.join(' '), 'chunk:s0:0 chunk:last:1', 'each slice once, numbered in order, the last one too');
     eq(seen[seen.length - 1], '/record/finish', 'finished last');
+    /* Not only sent after the last slice: sent once that slice's answer
+       has come back, or the server can meet the finish first. */
+    const order = o.first.log.map((e) => (e.answered ? `answered ${e.answered}` : e.url === '/record/chunk' ? `chunk:${e.slice}` : e.url));
+    eq(order.indexOf('answered chunk:last') > -1 && order.indexOf('answered chunk:last') < order.indexOf('/record/finish'), true,
+      `the finish waits for the last slice to be answered (${order.join(', ')})`);
     eq(seen.indexOf('/record/start') < seen.indexOf('chunk:s0:0'), true, 'started first');
     eq(o.first.log.find((e) => e.url === '/record/finish').body.length, 3, 'with how long it ran');
     eq(`${o.first.stopped} ${o.first.button} ${o.first.recording}`, '1 record false', 'the microphone let go, and ready for another');
@@ -7106,6 +7171,9 @@ check('the notes page says which version it is, and an earlier one can be asked 
   check('recording: after the first take V from the deck starts and stops one, and silence on the input is said in the bar', () => {
     const o = notesOut();
     eq(`${o.forwardedAfter.asked} ${o.forwardedAfter.button}`, '2 stop', 'V from the deck started the second take');
+    eq(o.forwardedStop.log.filter((x) => !x.startsWith('answered')).join(' '), 'chunk:last /record/finish',
+      'V from the deck stopped a take: its last slice, then the finish');
+    eq(o.forwardedStop.button, 'record', 'and the notes are ready for another');
     if (!/No sound/.test(o.silent)) throw new Error(`two seconds of silence said nothing: "${o.silent}"`);
     eq(o.heard, '', 'and sound clears it');
   });
@@ -7119,6 +7187,28 @@ check('the notes page says which version it is, and an earlier one can be asked 
     if (fin < 0) throw new Error(`the take was not finished: ${seen.join(' ')}`);
     eq(seen.indexOf('close') > fin, true, 'the second finishes the take, then closes the notes');
     eq(o.errors.length, 0, `no errors in the page (${o.errors[0]})`);
+  });
+
+  check('recording: a recorder that fails hands over its last slice before the take is finished', () => {
+    const o = notesOut();
+    if (!o.failed) throw new Error('not run: V from the deck did not stop the take before it');
+    const l = o.failed.log;
+    const tail = l.indexOf('answered chunk:tail');
+    if (tail < 0) throw new Error(`the last slice was never sent: ${l.join(', ')}`);
+    eq(tail < l.indexOf('/record/finish'), true, `finished only once the last slice had arrived (${l.join(', ')})`);
+    if (!/The recorder failed \(EncodingError\)/.test(o.failed.alert)) throw new Error(`the bar says ${o.failed.alert}`);
+    if (!/kept/.test(o.failed.note)) throw new Error(`it did not say the take was kept: ${o.failed.note}`);
+    eq(o.failed.button, 'record', 'and the notes are ready for another');
+    eq(o.thirdErrors.length, 0, `no errors in the page (${o.thirdErrors[0]})`);
+  });
+
+  check('recording: a take the server stops taking is named with the next start, so it does not hold the deck', () => {
+    const o = notesOut();
+    if (!o.lost) throw new Error('not run: V from the deck did not stop the take before it');
+    if (!/not reaching sipario \(refused here\)/.test(o.lost.alert)) throw new Error(`the bar says ${o.lost.alert}`);
+    eq(o.lost.button, 'record', 'the take ended');
+    eq(JSON.stringify(o.lost.starts), JSON.stringify([null, 'take-3']), 'the next start names the take given up on');
+    eq(o.lost.button2, 'stop', 'and V starts the next take straight away');
   });
 
   check('recording: docked, the notes offer to detach to record, and a window opened by hand records nothing', () => {
