@@ -6390,7 +6390,7 @@ check('the notes page says which version it is, and an earlier one can be asked 
     const write = (marks) => fs.writeFileSync(path.join(take, 'take.json'), JSON.stringify({ audio: 'audio.m4a', marks }));
     write([{ id: ids[0], t: 0.2 }, { id: ids[1], t: 1.5 }, { id: ids[2], t: 3 }]);
     const env = { ...process.env, SIPARIO_DATA: data };
-    const run = () => spawnSync('node', [path.join(ROOT, 'bin/sipario.js'), 'export', 'video', t],
+    const run = () => spawnSync(process.execPath, [path.join(ROOT, 'bin/sipario.js'), 'export', 'video', t],
       { cwd: dir, env, encoding: 'utf8', timeout: 120000 });
 
     const ok = run();
@@ -6400,6 +6400,7 @@ check('the notes page says which version it is, and an earlier one can be asked 
     const len = video.durationOf(mp4, ff);
     if (Math.abs(len - 4) > 0.15) throw new Error(`the video runs ${len}s against 4s of audio`);
     if (!/3 stills of 3 steps/.test(ok.stdout)) throw new Error(`it did not report its stills: ${ok.stdout}`);
+    if (!/from take 2026-10-03T10-00-00 \(live\)/.test(ok.stdout)) throw new Error(`it did not say what kind of take: ${ok.stdout}`);
 
     write([{ id: ids[0], t: 0 }, { id: 'no-such-step', t: 1 }]);
     const bad = run();
@@ -6964,6 +6965,71 @@ check('the notes page says which version it is, and an earlier one can be asked 
     if (!/<script src="\/js\/presenter\.js"><\/script>\s*<script src="\/js\/recorder\.js"><\/script>/.test(here)) {
       throw new Error('the notes on this machine do not load the recorder after the notes');
     }
+  });
+}
+
+{
+  check('takes: a deck\'s takes are listed oldest first by kind, and recover finishes one a recording left unfinished', () => {
+    /* Four takes written as the server leaves them: one finished, one
+       left unfinished an hour ago, one that stopped before a step was
+       marked, and one written to a moment ago, which may still be
+       recording. The CLI run as a reader would. */
+    const video = require('./lib/video.js');
+    const { spawnSync } = require('child_process');
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-takes-'));
+    const t = path.join(dir, 'talk');
+    fs.cpSync(TALK.dir, t, { recursive: true });
+    const data = path.join(dir, 'data');
+    const env = { ...process.env, SIPARIO_DATA: data };
+    const run = (...args) => spawnSync(process.execPath, [path.join(ROOT, 'bin/sipario.js'), 'takes', ...args],
+      { cwd: dir, env, encoding: 'utf8', timeout: 25000 });
+    const none = run(t);
+    eq(none.status, 0, `an empty listing runs (${none.stderr.trim()})`);
+    if (!/no takes of "Minimal"/.test(none.stdout)) throw new Error(`it said ${none.stdout}`);
+
+    const root = video.takesDir('sipario:minimal', data);
+    const hourAgo = (Date.now() - 3600 * 1000) / 1000;
+    const write = (id, file, value, audio = 'AUDIO') => {
+      fs.mkdirSync(path.join(root, id), { recursive: true });
+      fs.writeFileSync(path.join(root, id, file), JSON.stringify(value));
+      if (audio !== null) fs.writeFileSync(path.join(root, id, 'take.webm'), audio);
+    };
+    const mark = (id, t) => ({ id, t, v: '1' });
+    write('20261001-090000-aaaa', 'take.json', { version: 1, kind: 'live', audio: 'take.webm', length: 65.4,
+      marks: [mark('1-a-slide-of-every-template', 0), mark('2-the-keys', 20), mark('3-templates', 40)] });
+    write('20261001-100000-bbbb', 'marks.partial.json', { version: 1, kind: 'live', audio: 'take.webm',
+      marks: [mark('1-a-slide-of-every-template', 0), mark('2-the-keys', 3.5)], notes: {} });
+    write('20261001-110000-cccc', 'marks.partial.json', { version: 1, kind: 'live', audio: 'take.webm', marks: [], notes: {} });
+    for (const id of ['20261001-100000-bbbb', '20261001-110000-cccc']) {
+      for (const f of fs.readdirSync(path.join(root, id))) fs.utimesSync(path.join(root, id, f), hourAgo, hourAgo);
+    }
+    write('20261001-120000-dddd', 'marks.partial.json', { version: 1, kind: 'live', audio: 'take.webm',
+      marks: [mark('1-a-slide-of-every-template', 0)], notes: {} });
+
+    const listed = run(t);
+    eq(listed.status, 0, `it lists (${listed.stderr.trim()})`);
+    const rows = listed.stdout.trim().split('\n').slice(1).filter((l) => l.trim()).map((l) => l.trim().split(/\s{3,}/));
+    eq(rows.map((r) => r[0]).join(' '), '20261001-090000-aaaa 20261001-100000-bbbb 20261001-110000-cccc 20261001-120000-dddd', 'oldest first');
+    eq(rows.map((r) => r[1]).join(' '), 'live unfinished unfinished unfinished', 'each by its kind');
+    eq(`${rows[0][2]} ${rows[0][3]}`, '1:05 3 steps', 'a finished take by its length and its steps');
+    eq(rows[1][4], 'sipario takes recover 20261001-100000-bbbb', 'an unfinished one says how to finish it');
+
+    const ok = run('recover', '20261001-100000-bbbb', t);
+    eq(ok.status, 0, `it recovers (${ok.stderr.trim()})`);
+    if (!/2 steps, 5 bytes of audio/.test(ok.stdout)) throw new Error(`it said ${ok.stdout}`);
+    const back = video.readTake('sipario:minimal', '20261001-100000-bbbb', data);
+    eq(back.marks.map((m) => `${m.id}@${m.t}`).join(' '), '1-a-slide-of-every-template@0 2-the-keys@3.5', 'a take export video reads');
+    eq(fs.existsSync(path.join(root, '20261001-100000-bbbb', 'marks.partial.json')), false, 'and no longer unfinished');
+    if (!run(t).stdout.split('\n').some((l) => /20261001-100000-bbbb\s+live/.test(l))) throw new Error('the recovered take is not listed as live');
+
+    for (const [id, why] of [['20261001-090000-aaaa', /finished already/], ['20261001-110000-cccc', /before a step was marked/],
+      ['20261001-120000-dddd', /may still be recording/], ['no-such-take', /there is no take "no-such-take"; the takes kept are/]]) {
+      const r = run('recover', id, t);
+      eq(r.status, 1, `${id} is refused`);
+      if (!why.test(r.stderr)) throw new Error(`${id}: it said ${r.stderr.trim()}`);
+    }
+    eq(run('recover').status, 2, 'recover with no take is the usage');
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 }
 
