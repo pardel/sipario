@@ -6528,7 +6528,7 @@ check('the notes page says which version it is, and an earlier one can be asked 
         const chunk = (seq, body, h = B) => at('/record/chunk?take=' + take + '&seq=' + seq, body, h);
         out.chunks = {
           zero: (await chunk(0, 'AAA')).status,
-          zeroAgain: (await chunk(0, 'ZZZ')).status,
+          zeroAgain: await chunk(0, 'ZZZ'),
           one: (await chunk(1, 'BBB', { 'content-type': 'audio/webm' })).status,
           oneAgain: (await chunk(1, 'BBB')).status,
           gap: await chunk(3, 'DDD'),
@@ -6647,7 +6647,10 @@ check('the notes page says which version it is, and an earlier one can be asked 
     eq(o.second.status, 409, 'a second take of the deck is refused while the first records');
     if (!/already recording/.test(o.second.body)) throw new Error(`the refusal says ${o.second.body}`);
     eq(o.chunks.zero, 200, 'the first slice is taken');
-    eq(o.chunks.zeroAgain, 409, 'a second first slice, a recording begun again, is refused');
+    /* Sent again because its answer was lost, which the notes do: answered
+       as taken, and never written twice, so the file has one header. */
+    eq(o.chunks.zeroAgain.status, 200, 'the first slice sent again is answered as taken');
+    eq(JSON.parse(o.chunks.zeroAgain.body).again, true, 'and says it was had already');
     eq(`${o.chunks.one} ${o.chunks.oneAgain}`, '200 200', 'a slice sent twice is answered twice');
     eq(o.chunks.file, 'AAABBB', 'and appended once, in order');
     eq(o.chunks.gap.status, 409, 'a slice ahead of the next is refused');
@@ -6711,6 +6714,173 @@ check('the notes page says which version it is, and an earlier one can be asked 
     if (!/serve\([^)]*record: false/.test(fs.readFileSync(path.join(ROOT, 'lib/export.js'), 'utf8'))) {
       throw new Error('the export serves the talk without saying `record: false`');
     }
+  });
+}
+
+{
+  /* What goes wrong on the server's side of a take, in a process of its
+     own: a fault that killed the server would kill a probe shared with
+     the checks above, and say nothing about which. A disk refusing a
+     write is stood in for by a folder where the file would go, which no
+     owner of the folder can write over, root included. */
+  let ran = null;
+  const faultRun = () => {
+    if (ran) return ran;
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-faults-'));
+    const t = path.join(dir, 'talk');
+    fs.cpSync(TALK.dir, t, { recursive: true });
+    const data = path.join(dir, 'data');
+    const afile = path.join(dir, 'afile');
+    fs.writeFileSync(afile, 'a file, where a folder was wanted');
+    const probe = `
+      process.env.SIPARIO_DATA = ${JSON.stringify(data)};
+      const fs = require('fs'), path = require('path'), http = require('http');
+      const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+      const record = require(${JSON.stringify(path.join(ROOT, 'lib/record.js'))});
+      const video = require(${JSON.stringify(path.join(ROOT, 'lib/video.js'))});
+      const { sessionId } = require(${JSON.stringify(path.join(ROOT, 'lib/relay.js'))});
+      const quiet = { log(){}, warn(){}, error(){} };
+      const up = (srv) => new Promise((ok) => (srv.listening ? ok() : srv.once('listening', ok)));
+      const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      const ask = (port, p, body, headers = {}, method = 'POST') => new Promise((ok) => {
+        let status = 0, text = '';
+        const q = http.request({ host: '127.0.0.1', port, path: p, method, headers }, (r) => {
+          status = r.statusCode;
+          r.on('data', (c) => { text += c; });
+          r.on('end', () => ok({ status, body: text }));
+        });
+        q.on('error', (e) => ok({ status, body: text || e.message }));
+        q.end(body);
+      });
+      (async () => {
+        const out = {};
+        const s = serve(${JSON.stringify(t)}, { port: 0, log: quiet, audience: false, remote: false });
+        await up(s);
+        const P = s.address().port;
+        const json = (p, o) => ask(P, p, JSON.stringify(o), { 'content-type': 'application/json' });
+        const chunk = (take, seq, body) => ask(P, '/record/chunk?take=' + take + '&seq=' + seq, body, { 'content-type': 'application/octet-stream' });
+        const alive = async () => (await ask(P, '/', undefined, {}, 'GET')).status;
+        const start = { mime: 'audio/webm;codecs=opus' };
+        const ids = require(${JSON.stringify(path.join(ROOT, 'lib/export.js'))}).outline(
+          fs.readFileSync(${JSON.stringify(path.join(t, 'deck.md'))}, 'utf8'), require(${JSON.stringify(path.join(ROOT, 'lib/talk.js'))}).talk(${JSON.stringify(t)})).map((x) => x.id);
+        const tdir = video.takesDir('sipario:minimal');
+
+        /* A data folder under a file. */
+        process.env.SIPARIO_DATA = path.join(${JSON.stringify(afile)}, 'sub');
+        out.underFile = await json('/record/start', start);
+        out.underFile.alive = await alive();
+        process.env.SIPARIO_DATA = ${JSON.stringify(data)};
+
+        /* A take begun in a second that already holds one sorting late. */
+        for (let k = 0; k < 6; k++) fs.mkdirSync(path.join(tdir, sessionId(new Date(Date.now() + k * 1000)).slice(0, 15) + '-zzzy'), { recursive: true });
+        const a = JSON.parse((await json('/record/start', start)).body).take;
+        out.sameSecond = a;
+
+        /* The first slice sent again, its answer lost. */
+        out.zero = [(await chunk(a, 0, 'AAAA')).status, await chunk(a, 0, 'AAAA')];
+        out.zeroFile = fs.readFileSync(path.join(tdir, a, 'take.webm'), 'utf8');
+
+        /* The steps, refused by the disk, then taken once it has room. */
+        out.mark0 = (await json('/record/marks', { take: a, from: 0, marks: [{ id: ids[0], t: 0 }] })).status;
+        fs.mkdirSync(path.join(tdir, a, 'marks.partial.json.tmp'));
+        out.markFull = await json('/record/marks', { take: a, from: 1, marks: [{ id: ids[1], t: 1 }] });
+        out.markFull.alive = await alive();
+        fs.rmdirSync(path.join(tdir, a, 'marks.partial.json.tmp'));
+        out.markRoom = JSON.parse((await json('/record/marks', { take: a, from: 1, marks: [{ id: ids[1], t: 1 }] })).body);
+
+        /* The finish, refused by the disk, then sent again. */
+        fs.mkdirSync(path.join(tdir, a, 'take.json.tmp'));
+        out.finishFull = await json('/record/finish', { take: a });
+        out.finishFull.alive = await alive();
+        fs.rmdirSync(path.join(tdir, a, 'take.json.tmp'));
+        out.finishRoom = JSON.parse((await json('/record/finish', { take: a })).body);
+
+        /* A take set aside while one of its slices is still arriving. */
+        record.LIMITS.stale = 100;
+        const b = JSON.parse((await json('/record/start', start)).body).take;
+        const held = new Promise((ok) => {
+          let status = 0, text = '';
+          const q = http.request({ host: '127.0.0.1', port: P, method: 'POST', path: '/record/chunk?take=' + b + '&seq=0',
+            headers: { 'content-type': 'application/octet-stream', 'content-length': 20 } }, (r) => {
+            status = r.statusCode;
+            r.on('data', (c) => { text += c; });
+            r.on('end', () => ok({ status, body: text }));
+          });
+          q.on('error', (e) => ok({ status, body: text || e.message }));
+          q.write('BBBB');
+          out.finishHeld = () => q.end('BBBBBBBBBBBBBBBB');
+        });
+        await wait(250);
+        const c = JSON.parse((await json('/record/start', start)).body);
+        out.finishHeld();
+        out.held = await held;
+        out.setAside = { b, c: c.take, aside: c.setAside, next: (await chunk(c.take, 0, 'CCCC')).status,
+                         bFile: fs.readFileSync(path.join(tdir, b, 'take.webm'), 'utf8'),
+                         cFile: fs.readFileSync(path.join(tdir, c.take, 'take.webm'), 'utf8') };
+        record.LIMITS.stale = 30 * 1000;
+
+        /* A take the notes gave up on is set aside at once, and only that one. */
+        out.gaveUp = JSON.parse((await json('/record/start', { ...start, gaveUp: c.take })).body);
+        out.notGaveUp = await json('/record/start', { ...start, gaveUp: 'some-other-take' });
+
+        const closed = new Promise((ok) => s.once('close', ok));
+        s.close();
+        if (s.closeAllConnections) s.closeAllConnections();
+        await closed;
+        delete out.finishHeld;
+        console.log(JSON.stringify(out));
+      })().catch((e) => { console.log(JSON.stringify({ error: e.stack })); process.exit(0); });
+    `;
+    const r = require('child_process').spawnSync(process.execPath, ['-e', probe], { encoding: 'utf8', timeout: 30000 });
+    try { ran = JSON.parse(r.stdout.trim().split('\n').pop()); } catch { ran = { error: `the server ended (${r.status}): ${r.stderr.trim().split('\n').slice(0, 3).join(' / ')}` }; }
+    if (!ran.error) ran.exit = r.status;
+    fs.rmSync(dir, { recursive: true, force: true });
+    return ran;
+  };
+  const faults = () => {
+    const o = faultRun();
+    if (o.error) throw new Error(o.error);
+    return o;
+  };
+
+  check('recording: a disk that refuses a take\'s start, steps or finish is answered by name, and the server stays up', () => {
+    const o = faults();
+    eq(o.underFile.status, 500, 'a data folder under a file refuses the start');
+    if (!/could not be kept/.test(o.underFile.body) || !/ENOTDIR/.test(o.underFile.body)) throw new Error(`it said ${o.underFile.body}`);
+    eq(o.underFile.alive, 200, 'and the deck is still served');
+    eq(o.mark0, 200, 'a step is kept');
+    eq(o.markFull.status, 500, 'a step the disk will not take is refused');
+    if (!/steps could not be written/.test(o.markFull.body)) throw new Error(`it said ${o.markFull.body}`);
+    eq(o.markFull.alive, 200, 'and the deck is still served');
+    eq(o.markRoom.have, 2, 'sent again once there is room, it is kept, and the refused one was not counted');
+    eq(o.finishFull.status, 500, 'a finish the disk will not take is refused');
+    if (!/could not be finished/.test(o.finishFull.body)) throw new Error(`it said ${o.finishFull.body}`);
+    eq(o.finishFull.alive, 200, 'and the deck is still served');
+    eq(`${o.finishRoom.ok} ${o.finishRoom.marks}`, 'true 2', 'the take was still open, and a finish sent again keeps it');
+    eq(o.exit, 0, 'the server ended when it was closed, and not before');
+  });
+
+  check('recording: the first slice sent again is taken once, and a slice still arriving when its take is set aside writes nothing', () => {
+    const o = faults();
+    eq(`${o.zero[0]} ${o.zero[1].status} ${JSON.parse(o.zero[1].body).again}`, '200 200 true', 'the first slice sent again is answered as had');
+    eq(o.zeroFile, 'AAAA', 'and is in the file once, one header');
+    eq(o.setAside.aside, o.setAside.b, 'the quiet take was set aside while its slice arrived');
+    eq(o.held.status, 409, 'that slice is refused once it has arrived');
+    if (!/set aside while this slice arrived/.test(o.held.body)) throw new Error(`it said ${o.held.body}`);
+    eq(o.setAside.next, 200, 'the next take takes its own first slice');
+    eq(`${JSON.stringify(o.setAside.bFile)} ${JSON.stringify(o.setAside.cFile)}`, '"" "CCCC"',
+      'and the late slice is in neither file, the next take\'s audio its own');
+  });
+
+  check('recording: a take begun in the same second as another is named to sort after it, and a take the notes gave up on does not hold the deck', () => {
+    const o = faults();
+    const id = o.sameSecond;
+    if (!(id > `${id.slice(0, 15)}-zzzy`)) throw new Error(`take ${id} sorts before one begun earlier in its second`);
+    if (!/^\d{8}-\d{6}-[a-z0-9]{4}$/.test(id)) throw new Error(`the take is named ${id}`);
+    if (!o.gaveUp.ok || !o.gaveUp.take) throw new Error(`the take after one given up on did not start at once: ${JSON.stringify(o.gaveUp)}`);
+    eq(o.gaveUp.setAside, o.setAside.c, 'the take given up on is set aside, and named');
+    eq(o.notGaveUp.status, 409, 'naming some other take sets nothing aside');
+    if (!/already recording/.test(o.notGaveUp.body) || !/quiet for 30s/.test(o.notGaveUp.body)) throw new Error(`it said ${o.notGaveUp.body}`);
   });
 }
 
