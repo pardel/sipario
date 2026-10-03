@@ -90,20 +90,23 @@ like, so change the engine instead unless the example is what is wrong.
 npm test
 ```
 
-288 checks, one line each, with a count at the end and exit status 1 if
+318 checks, one line each, with a count at the end and exit status 1 if
 any failed. Nothing stops at the first failure: every check runs, so one
-broken thing does not hide the next. Six checks need a browser on the
+broken thing does not hide the next. Eight checks need a browser on the
 machine: three export the example both ways and read the files back, and
 break a copy of it to see the export refuse, one photographs each
-starter's title slide and reads its QR code off the picture, and one lays
+starter's title slide and reads its QR code off the picture, one lays
 out every build step on the stage and in a phone's copy and compares
-them, and one opens four deck windows and the notes at once, to see them
-share the six connections a browser allows one origin. Three need a
-network address of the machine's own, to ask a served talk for its script,
-and for the notes behind their link, as another machine would. A check
+them, one opens four deck windows and the notes at once, to see them
+share the six connections a browser allows one origin, one makes a video
+from a take, which needs ffmpeg as well, and one records a take through
+the notes page with Chrome's stand-in microphone, and reads its audio
+back with ffmpeg when there is one. Four need a network address of the
+machine's own, to ask a served talk for its script, for the notes behind
+their link, and for the take routes, as another machine would. A check
 that cannot run prints a line saying why and is not counted either way, so
-a machine with no browser runs 282 and one with no network as well runs
-279.
+a machine with no browser runs 310, one with a browser and no ffmpeg 317,
+and one with no browser and no network either 306.
 
 The suite writes a room's sessions to a scratch `SIPARIO_DATA` of its
 own, so running it leaves nothing among your real ones.
