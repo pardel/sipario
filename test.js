@@ -6448,6 +6448,267 @@ check('the notes page says which version it is, and an earlier one can be asked 
   });
 }
 
+{
+  /* The server's half of a take: one probe, a talk served on a port of
+     its own with a data folder of its own, asked what a notes window
+     asks and what a page on another site might. Run once, read by the
+     checks below. */
+  const lan = (() => {
+    for (const list of Object.values(require('os').networkInterfaces())) {
+      for (const n of list || []) if (n.family === 'IPv4' && !n.internal) return n.address;
+    }
+    return null;
+  })();
+  let ran = null;
+  const recordRun = () => {
+    if (ran) return ran;
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-record-'));
+    const t = path.join(dir, 'talk');
+    fs.cpSync(TALK.dir, t, { recursive: true });
+    const data = path.join(dir, 'data');
+    const probe = `
+      process.env.SIPARIO_DATA = ${JSON.stringify(data)};
+      const fs = require('fs'), path = require('path'), http = require('http');
+      const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+      const record = require(${JSON.stringify(path.join(ROOT, 'lib/record.js'))});
+      const video = require(${JSON.stringify(path.join(ROOT, 'lib/video.js'))});
+      const quiet = { log(){}, warn(){}, error(){} };
+      const LAN = ${JSON.stringify(lan)};
+      const up = (srv) => new Promise((ok) => (srv.listening ? ok() : srv.once('listening', ok)));
+      const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      /* A POST of any body and type, and its answer as the client hears
+         it: the status from the response's head, whatever the socket does
+         after, so a 413 sent before a close counts as heard. */
+      const ask = (host, port, p, body, headers = {}, method = 'POST') => new Promise((ok) => {
+        let status = 0, text = '';
+        const q = http.request({ host, port, path: p, method, headers }, (r) => {
+          status = r.statusCode;
+          r.on('data', (c) => { text += c; });
+          r.on('end', () => ok({ status, body: text }));
+          r.on('error', () => ok({ status, body: text }));
+        });
+        q.on('error', (e) => ok({ status, body: text || e.message }));
+        if (body && body.pipe) body.pipe(q); else q.end(body);
+      });
+      const J = { 'content-type': 'application/json' };
+      const B = { 'content-type': 'application/octet-stream' };
+      (async () => {
+        const out = {};
+        const s = serve(${JSON.stringify(t)}, { port: 0, log: quiet, audience: false, remote: false });
+        await up(s);
+        const P = s.address().port;
+        const at = (p, body, headers, method) => ask('127.0.0.1', P, p, body, headers, method);
+        const json = (p, o, h = {}) => at(p, JSON.stringify(o), { ...J, ...h });
+        const start = { mime: 'audio/webm;codecs=opus', settings: { channelCount: 1, sampleRate: 48000 } };
+
+        /* Who is answered. */
+        out.guard = {
+          lan: LAN ? (await ask(LAN, P, '/record/start', JSON.stringify(start), J)).status : null,
+          rebound: (await json('/record/start', start, { host: 'rebound.example:' + P })).status,
+          crossOrigin: (await json('/record/start', start, { origin: 'http://evil.example' })).status,
+          otherPort: (await json('/record/start', start, { origin: 'http://localhost:' + (P + 1) })).status,
+          crossSite: (await json('/record/start', start, { 'sec-fetch-site': 'cross-site' })).status,
+          options: (await at('/record/start', '', { origin: 'http://evil.example', 'access-control-request-method': 'POST' }, 'OPTIONS')).status,
+          get: (await at('/record/start', undefined, {}, 'GET')).status,
+          elsewhere: (await json('/record/delete', {})).status,
+          plain: (await at('/record/start', JSON.stringify(start), { 'content-type': 'text/plain' })).status,
+          form: (await at('/record/start', 'mime=audio/webm', { 'content-type': 'application/x-www-form-urlencoded' })).status,
+        };
+        const first = await json('/record/start', start, { origin: 'http://localhost:' + P, 'sec-fetch-site': 'same-origin' });
+        out.first = { status: first.status, ...JSON.parse(first.body) };
+        const take = out.first.take;
+        out.second = await json('/record/start', start);
+        out.guard.chunkPlain = (await at('/record/chunk?take=' + take + '&seq=0', 'AAA', { 'content-type': 'text/plain' })).status;
+        out.guard.chunkMultipart = (await at('/record/chunk?take=' + take + '&seq=0', '--x\\r\\n\\r\\nAAA\\r\\n--x--',
+          { 'content-type': 'multipart/form-data; boundary=x' })).status;
+        out.guard.chunkForm = (await at('/record/chunk?take=' + take + '&seq=0', 'a=AAA', { 'content-type': 'application/x-www-form-urlencoded' })).status;
+
+        /* The slices, in order and once each. */
+        const chunk = (seq, body, h = B) => at('/record/chunk?take=' + take + '&seq=' + seq, body, h);
+        out.chunks = {
+          zero: (await chunk(0, 'AAA')).status,
+          zeroAgain: (await chunk(0, 'ZZZ')).status,
+          one: (await chunk(1, 'BBB', { 'content-type': 'audio/webm' })).status,
+          oneAgain: (await chunk(1, 'BBB')).status,
+          gap: await chunk(3, 'DDD'),
+          noTake: (await at('/record/chunk?take=../../etc&seq=2', 'X', B)).status,
+        };
+        const audio = path.join(video.takesDir('sipario:minimal'), take, 'take.webm');
+        out.chunks.file = fs.readFileSync(audio, 'utf8');
+
+        /* Too large: said before the connection goes, and heard. */
+        out.big = await chunk(2, Buffer.alloc(record.LIMITS.chunk + 1));
+        record.LIMITS.chunk = 64;
+        const { Readable } = require('stream');
+        out.bigStreamed = await chunk(2, Readable.from([Buffer.alloc(40), Buffer.alloc(40)]), { ...B, 'transfer-encoding': 'chunked' });
+        record.LIMITS.chunk = 8 << 20;
+        record.LIMITS.take = 10;
+        out.full = await chunk(2, 'CCCCCC');
+        record.LIMITS.take = 300 << 20;
+        out.afterBig = (await chunk(2, 'CCC')).status;
+        out.fileAfterBig = fs.readFileSync(audio, 'utf8');
+
+        /* The steps, kept as they come. */
+        const ids = require(${JSON.stringify(path.join(ROOT, 'lib/export.js'))}).outline(
+          fs.readFileSync(${JSON.stringify(path.join(t, 'deck.md'))}, 'utf8'), require(${JSON.stringify(path.join(ROOT, 'lib/talk.js'))}).talk(${JSON.stringify(t)})).map((x) => x.id);
+        out.ids = ids;
+        out.marks = {
+          one: JSON.parse((await json('/record/marks', { take, from: 0, marks: [{ id: ids[0], t: 0, v: null }] })).body),
+          overlap: JSON.parse((await json('/record/marks', { take, from: 0, marks: [{ id: ids[0], t: 0 }, { id: ids[1], t: 1.23456 }, { id: 'gone-step', t: 2 }] })).body),
+          gap: (await json('/record/marks', { take, from: 9, marks: [{ id: ids[2], t: 3 }] })).status,
+          bad: (await json('/record/marks', { take, from: 3, marks: [{ id: ids[2], t: -1 }] })).status,
+        };
+        const dirOf = path.dirname(audio);
+        const partial = JSON.parse(fs.readFileSync(path.join(dirOf, 'marks.partial.json'), 'utf8'));
+        out.partial = { marks: partial.marks, notes: partial.notes, json: fs.existsSync(path.join(dirOf, 'take.json')),
+                        listed: video.listTakes('sipario:minimal') };
+        out.finish = JSON.parse((await json('/record/finish', { take, length: 4.5 })).body);
+        out.done = {
+          partialGone: !fs.existsSync(path.join(dirOf, 'marks.partial.json')),
+          listed: video.listTakes('sipario:minimal'),
+          after: (await chunk(3, 'EEE')).status,
+          again: (await json('/record/finish', { take })).status,
+        };
+        try {
+          const r = video.readTake('sipario:minimal', take);
+          out.read = { audio: fs.readFileSync(r.audioFile, 'utf8'), kind: r.kind, version: r.version, marks: r.marks,
+                       notes: r.notes, length: r.length, settings: r.settings, mime: r.mime, deck: r.deck };
+        } catch (e) { out.read = { error: e.message }; }
+
+        /* A take gone quiet does not hold the deck; closing the server
+           leaves the open one unfinished. */
+        record.LIMITS.stale = 50;
+        const quietTake = JSON.parse((await json('/record/start', start)).body).take;
+        await wait(120);
+        const next = JSON.parse((await json('/record/start', start)).body);
+        out.stale = { quiet: quietTake, setAside: next.setAside, next: next.take };
+        record.LIMITS.stale = 30 * 1000;
+        out.idFormat = [take, quietTake, next.take];
+
+        /* With record: false, nothing is there. */
+        const off = serve(${JSON.stringify(t)}, { port: 0, log: quiet, audience: false, remote: false, record: false });
+        await up(off);
+        out.off = (await ask('127.0.0.1', off.address().port, '/record/start', JSON.stringify(start), J)).status;
+        off.close();
+
+        /* A data folder the server watches. */
+        process.env.SIPARIO_DATA = path.join(${JSON.stringify(t)}, 'data');
+        out.watched = await json('/record/start', start);
+        process.env.SIPARIO_DATA = ${JSON.stringify(data)};
+
+        console.log(JSON.stringify(out));
+        s.close();
+        if (s.closeAllConnections) s.closeAllConnections();
+      })().catch((e) => { console.log(JSON.stringify({ error: e.stack })); process.exit(0); });
+    `;
+    const r = require('child_process').spawnSync(process.execPath, ['-e', probe], { encoding: 'utf8', timeout: 30000 });
+    ran = { status: r.status, signal: r.signal, stderr: r.stderr, data, out: null };
+    try { ran.out = JSON.parse(r.stdout.trim().split('\n').pop()); } catch { ran.out = { error: `no output: ${r.stdout} ${r.stderr}` }; }
+    const ls = (d) => (fs.existsSync(d) ? fs.readdirSync(d) : []);
+    ran.talkData = ls(path.join(t, 'data'));
+    ran.left = ls(path.join(data, 'takes', 'minimal'));
+    ran.unfinished = ran.out.stale ? fs.existsSync(path.join(data, 'takes', 'minimal', ran.out.stale.next, 'marks.partial.json')) : null;
+    fs.rmSync(dir, { recursive: true, force: true });
+    return ran;
+  };
+  const result = () => {
+    const r = recordRun();
+    if (r.out.error) throw new Error(r.out.error);
+    return r.out;
+  };
+
+  check('recording: the take routes answer this machine, by a loopback name, from a page of its own, and nothing else', () => {
+    const o = result();
+    if (lan) eq(o.guard.lan, 404, 'from the network, nothing is there');
+    eq(o.guard.rebound, 404, 'nor for a page that reached this machine by another name');
+    eq(o.guard.crossOrigin, 404, 'nor for a page on another site, by its Origin');
+    eq(o.guard.otherPort, 404, 'nor for one of this machine on another port');
+    eq(o.guard.crossSite, 404, 'nor for a request the browser says is cross-site');
+    eq(o.guard.options, 404, 'a preflight is never answered');
+    eq(o.guard.get, 404, 'and nothing is there to GET');
+    eq(o.guard.elsewhere, 404, 'a route not named is not there');
+    eq(`${o.guard.plain} ${o.guard.form}`, '415 415', 'a start that does not say it is JSON is refused');
+    eq(`${o.guard.chunkPlain} ${o.guard.chunkMultipart} ${o.guard.chunkForm}`, '415 415 415',
+      'audio sent as text, a form or a multipart form is refused');
+    eq(o.first.status, 200, 'a page of its own, by Origin and fetch site, is answered');
+    eq(o.off, 404, 'a server asked to take no recording has no routes for one');
+  });
+
+  check('recording: the server names the take, one per deck at a time, and appends its slices once each, in order', () => {
+    const o = result();
+    if (!/^\d{8}-\d{6}-[a-z0-9]{1,4}$/.test(o.first.take)) throw new Error(`the take is named ${o.first.take}`);
+    eq(o.idFormat.slice().sort().join(' '), o.idFormat.join(' '), 'names that sort in the order the takes began');
+    eq(o.first.audio, 'take.webm', 'its audio named from what the browser records');
+    eq(o.second.status, 409, 'a second take of the deck is refused while the first records');
+    if (!/already recording/.test(o.second.body)) throw new Error(`the refusal says ${o.second.body}`);
+    eq(o.chunks.zero, 200, 'the first slice is taken');
+    eq(o.chunks.zeroAgain, 409, 'a second first slice, a recording begun again, is refused');
+    eq(`${o.chunks.one} ${o.chunks.oneAgain}`, '200 200', 'a slice sent twice is answered twice');
+    eq(o.chunks.file, 'AAABBB', 'and appended once, in order');
+    eq(o.chunks.gap.status, 409, 'a slice ahead of the next is refused');
+    eq(JSON.parse(o.chunks.gap.body).next, 2, 'saying which one is next');
+    eq(o.chunks.noTake, 409, 'a take this server did not open is not a path to anything');
+  });
+
+  check('recording: a slice too large, or one that would overfill the take, is answered 413 and the sender hears it', () => {
+    const o = result();
+    eq(o.big.status, 413, 'a slice over the limit, said by its length, is answered 413 and heard');
+    eq(o.bigStreamed.status, 413, 'and so is one that only says so as it arrives');
+    eq(o.full.status, 413, 'a slice that would take the take past its limit too');
+    eq(o.afterBig, 200, 'the take goes on after a refusal');
+    eq(o.fileAfterBig, 'AAABBBCCC', 'and nothing of a refused slice is in the file');
+  });
+
+  check('recording: the steps are kept as they arrive, and take.json is written only when the take is finished', () => {
+    const o = result();
+    eq(`${o.marks.one.have} ${o.marks.overlap.have}`, '1 3', 'steps sent again from an earlier index are kept once');
+    eq(o.marks.gap, 409, 'steps from past the end are refused');
+    eq(o.marks.bad, 400, 'and a step at no moment');
+    eq(o.partial.marks.map((m) => `${m.id}@${m.t}`).join(' '), `${o.ids[0]}@0 ${o.ids[1]}@1.235 gone-step@2`,
+      'kept on disk as they came, to the millisecond, a step the deck lacks included');
+    eq(o.partial.json, false, 'no take.json while it records');
+    eq(o.partial.listed.length, 0, 'so export video cannot pick it up half written');
+    eq(o.finish.ok, true, `it finishes (${JSON.stringify(o.finish)})`);
+    eq(`${o.done.partialGone} ${o.done.listed.join(' ')}`, `true ${o.first.take}`, 'finished, it is a take');
+    eq(`${o.done.after} ${o.done.again}`, '409 409', 'and takes nothing more');
+  });
+
+  check('recording: a finished take is one export video reads, with the script that was on screen kept beside it', () => {
+    const o = result();
+    if (o.read.error) throw new Error(`readTake refused it: ${o.read.error}`);
+    eq(o.read.audio, 'AAABBBCCC', 'its audio');
+    eq(`${o.read.version} ${o.read.kind} ${o.read.deck} ${o.read.mime}`, '1 live sipario:minimal audio/webm;codecs=opus', 'what it is');
+    eq(o.read.length, 4.5, 'how long it ran, by the recorder');
+    eq(JSON.stringify(o.read.settings), JSON.stringify({ channelCount: 1, sampleRate: 48000 }), 'what the microphone gave');
+    const v = o.read.marks[0].v;
+    if (!v || o.read.marks.some((m) => m.v !== v)) throw new Error(`each mark names the deck's version: ${JSON.stringify(o.read.marks)}`);
+    const notes = o.read.notes[v];
+    if (!notes) throw new Error(`no script kept for version ${v}: ${JSON.stringify(Object.keys(o.read.notes))}`);
+    eq(Object.keys(notes).join(' '), o.ids.join(' '), 'the script of every step');
+    if (!/^This deck exists twice over/.test(notes[o.ids[0]])) throw new Error(`the first step's script is ${notes[o.ids[0]]}`);
+  });
+
+  check('recording: a data folder inside the talk is refused by name, and a take gone quiet does not hold the deck', () => {
+    const r = recordRun();
+    const o = result();
+    eq(o.watched.status, 409, 'takes inside a folder the server watches are refused');
+    if (!/watches/.test(o.watched.body) || !/SIPARIO_DATA/.test(o.watched.body)) throw new Error(`it said ${o.watched.body}`);
+    eq(r.talkData.length, 0, 'and nothing was written into the talk');
+    eq(o.stale.setAside, o.stale.quiet, 'a take gone quiet is set aside for the next, and named');
+    if (!o.stale.next) throw new Error('the next take did not start');
+    eq(r.unfinished, true, 'closing the server left the open take unfinished, its steps on disk');
+    if (r.status === null) throw new Error(`the process did not end by itself (${r.signal}): a take held it open`);
+  });
+
+  check('recording: the export serves the talk with no take routes', () => {
+    /* A server that exists to be photographed accepts nothing, and its
+       listener is on every interface when there is no room. */
+    if (!/serve\([^)]*record: false/.test(fs.readFileSync(path.join(ROOT, 'lib/export.js'), 'utf8'))) {
+      throw new Error('the export serves the talk without saying `record: false`');
+    }
+  });
+}
+
 /* And everything true of any talk, run over both this repo ships: the
    fixture, and the same deck in its theatre-bill dress, which is a talk
    like any other and rots like one if nothing renders it. */
