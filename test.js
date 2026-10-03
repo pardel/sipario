@@ -6558,8 +6558,14 @@ check('the notes page says which version it is, and an earlier one can be asked 
     const probe = `
       process.env.SIPARIO_DATA = ${JSON.stringify(data)};
       const fs = require('fs'), path = require('path'), http = require('http');
-      const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
+      /* Every recorder a server makes, kept to ask afterwards what it
+         still holds open: wrapped before the server is loaded, since it
+         takes createRecorder as it loads. */
       const record = require(${JSON.stringify(path.join(ROOT, 'lib/record.js'))});
+      const recorders = [];
+      const made = record.createRecorder;
+      record.createRecorder = (o) => { const r = made(o); recorders.push(r); return r; };
+      const { serve } = require(${JSON.stringify(path.join(ROOT, 'lib/server.js'))});
       const video = require(${JSON.stringify(path.join(ROOT, 'lib/video.js'))});
       const quiet = { log(){}, warn(){}, error(){} };
       const LAN = ${JSON.stringify(lan)};
@@ -6685,9 +6691,13 @@ check('the notes page says which version it is, and an earlier one can be asked 
         out.watched = await json('/record/start', start);
         process.env.SIPARIO_DATA = ${JSON.stringify(data)};
 
-        console.log(JSON.stringify(out));
+        out.openBefore = recorders.map((r) => r.open().length);
+        const closed = new Promise((ok) => s.once('close', ok));
         s.close();
         if (s.closeAllConnections) s.closeAllConnections();
+        await closed;
+        out.openAfter = recorders.map((r) => r.open().length);
+        console.log(JSON.stringify(out));
       })().catch((e) => { console.log(JSON.stringify({ error: e.stack })); process.exit(0); });
     `;
     const r = require('child_process').spawnSync(process.execPath, ['-e', probe], { encoding: 'utf8', timeout: 30000 });
@@ -6706,9 +6716,15 @@ check('the notes page says which version it is, and an earlier one can be asked 
     return r.out;
   };
 
+  const fromNetwork = 'recording: asked from the network, the take routes are not there';
+  if (lan) {
+    check(fromNetwork, () => eq(result().guard.lan, 404, 'from the network, nothing is there'));
+  } else {
+    console.log(`  --    ${fromNetwork}\n        not run: this machine has no network address to ask from`);
+  }
+
   check('recording: the take routes answer this machine, by a loopback name, from a page of its own, and nothing else', () => {
     const o = result();
-    if (lan) eq(o.guard.lan, 404, 'from the network, nothing is there');
     eq(o.guard.rebound, 404, 'nor for a page that reached this machine by another name');
     eq(o.guard.crossOrigin, 404, 'nor for a page on another site, by its Origin');
     eq(o.guard.otherPort, 404, 'nor for one of this machine on another port');
@@ -6793,6 +6809,7 @@ check('the notes page says which version it is, and an earlier one can be asked 
     eq(o.stale.setAside, o.stale.quiet, 'a take gone quiet is set aside for the next, and named');
     if (!o.stale.next) throw new Error('the next take did not start');
     eq(r.unfinished, true, 'closing the server left the open take unfinished, its steps on disk');
+    eq(`${o.openBefore.join(' ')} -> ${o.openAfter.join(' ')}`, '1 -> 0', 'the server\'s close let go of the take it held open');
     if (r.status === null) throw new Error(`the process did not end by itself (${r.signal}): a take held it open`);
   });
 
@@ -7390,10 +7407,17 @@ check('the notes page says which version it is, and an earlier one can be asked 
      server agree on a file that decodes. */
   let browser = null;
   try { browser = findBrowser(); } catch { /* none here */ }
-  const name = 'recording: in a real browser, a take of three steps is recorded, uploaded and finished, and its audio decodes';
+  /* Whether its audio decodes is ffmpeg's to say. Without it the take is
+     still recorded and checked, under a name that claims no more, and the
+     decoding is said not to have been run. */
+  let ff = null;
+  try { ff = require('./lib/video.js').findFfmpeg(); } catch { /* none here */ }
+  const recorded = 'recording: in a real browser, a take of three steps is recorded, uploaded and finished';
+  const name = ff ? `${recorded}, and its audio decodes` : recorded;
   if (!browser) {
     console.log(`  --    ${name}\n        not run: no browser on this machine to record with`);
   } else {
+    if (!ff) console.log(`  --    recording: in a real browser, the take's audio decodes\n        not run: no ffmpeg on this machine`);
     check(name, () => {
       const video = require('./lib/video.js');
       const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-take-'));
@@ -7454,8 +7478,6 @@ check('the notes page says which version it is, and an earlier one can be asked 
         if (!(ts[0] === 0 && ts[1] > 0.3 && ts[2] - ts[1] > 0.3 && ts[2] < 2.5)) throw new Error(`the steps fall at ${ts.join(', ')}s`);
         eq(/^audio\/webm/.test(take.mime) && take.audio === 'take.webm', true, `recorded as WebM (${take.mime})`);
         if (!take.settings || typeof take.settings.sampleRate !== 'number') throw new Error(`no microphone settings kept: ${JSON.stringify(take.settings)}`);
-        let ff = null;
-        try { ff = video.findFfmpeg(); } catch { /* none here */ }
         if (ff) {
           const len = video.durationOf(take.audioFile, ff);
           if (!(len > 1.2 && len < 3.5)) throw new Error(`the audio runs ${len}s for a take of about 1.6s`);
