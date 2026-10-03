@@ -13,7 +13,8 @@ so a break ships as a minor and this file is the whole of the warning.
   folder and never the talk, so a window closed mid-take keeps all but its
   last few seconds. The docked notes offer "Detach to record"; the notes on
   another device do not record. `npx sipario export video` makes the video
-  from the latest take, and says which kind of take it used.
+  from the latest finished take, says which kind of take it used, and names
+  a newer one left unfinished.
 - **Added:** `sipario takes` lists a deck's takes, oldest first, by kind,
   length and steps; `sipario takes recover <take>` finishes one a recording
   left unfinished.

@@ -6364,6 +6364,29 @@ check('the notes page says which version it is, and an earlier one can be asked 
     fs.rmSync(root, { recursive: true, force: true });
   });
 
+  check('video: a newer take a recording left unfinished is named, not passed over in silence', () => {
+    /* Never the one exported, but most likely the one the speaker has
+       just made: the window closed by the deck mid-take, say. */
+    const root = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-takes-'));
+    const put = (id, file) => {
+      fs.mkdirSync(path.join(root, 'takes', 't', id), { recursive: true });
+      fs.writeFileSync(path.join(root, 'takes', 't', id, file), JSON.stringify({ audio: 'a.webm', marks: [{ id: 'x', t: 0 }] }));
+    };
+    put('20261002-100000-aaaa', 'marks.partial.json');
+    let err = null;
+    try { video.readTake('sipario:t', null, root); } catch (e) { err = e; }
+    if (!err || !/Take 20261002-100000-aaaa was left unfinished: sipario takes recover 20261002-100000-aaaa finishes it/.test(err.message)) {
+      throw new Error(`with only an unfinished take, it said ${err && err.message}`);
+    }
+    put('20261001-100000-aaaa', 'take.json');
+    put('20261003-100000-aaaa', 'marks.partial.json');
+    const r = video.readTake('sipario:t', null, root);
+    eq(r.take, '20261001-100000-aaaa', 'the latest finished take is the one read');
+    eq(r.unfinished.join(' '), '20261002-100000-aaaa 20261003-100000-aaaa', 'and the newer ones left unfinished are named');
+    eq(video.readTake('sipario:t', '20261001-100000-aaaa', root).unfinished.length, 0, 'a take named is the one asked for, and nothing is said');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
   let browser = null;
   let ff = null;
   try { browser = findBrowser(); } catch { /* none here */ }
@@ -6401,6 +6424,16 @@ check('the notes page says which version it is, and an earlier one can be asked 
     if (Math.abs(len - 4) > 0.15) throw new Error(`the video runs ${len}s against 4s of audio`);
     if (!/3 stills of 3 steps/.test(ok.stdout)) throw new Error(`it did not report its stills: ${ok.stdout}`);
     if (!/from take 2026-10-03T10-00-00 \(live\)/.test(ok.stdout)) throw new Error(`it did not say what kind of take: ${ok.stdout}`);
+
+    const left = path.join(path.dirname(take), '2026-10-04T10-00-00');
+    fs.mkdirSync(left);
+    fs.writeFileSync(path.join(left, 'marks.partial.json'), JSON.stringify({ audio: 'take.webm', marks: [{ id: ids[0], t: 0 }] }));
+    const passed = run();
+    eq(passed.status, 0, `it exported past an unfinished take (${passed.stderr.trim()})`);
+    if (!/from take 2026-10-03T10-00-00/.test(passed.stdout)) throw new Error(`it exported something else: ${passed.stdout}`);
+    if (!/take 2026-10-04T10-00-00 is newer, and was left unfinished.*sipario takes recover 2026-10-04T10-00-00/.test(passed.stderr)) {
+      throw new Error(`it did not name the newer unfinished take: ${passed.stderr.trim()}`);
+    }
 
     write([{ id: ids[0], t: 0 }, { id: 'no-such-step', t: 1 }]);
     const bad = run();

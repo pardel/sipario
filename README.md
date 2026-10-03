@@ -380,9 +380,10 @@ would reload the deck every few seconds, so the server refuses a data
 folder inside it. The audio reaches the server as it is recorded, so a
 window closed mid-take, by the deck's <kbd>N</kbd> or a crash, keeps all
 but its last few seconds; `sipario takes` lists such a take as unfinished,
-and `sipario takes recover <take>` finishes it. The video is made by
-ffmpeg, borrowed from the machine like the browser (`SIPARIO_FFMPEG` names
-one PATH would miss).
+and `sipario takes recover <take>` finishes it. `export video` uses the
+latest finished take, and says so when a newer one was left unfinished. The
+video is made by ffmpeg, borrowed from the machine like the browser
+(`SIPARIO_FFMPEG` names one PATH would miss).
 
 ## Using it as a library
 
