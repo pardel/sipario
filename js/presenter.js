@@ -338,6 +338,28 @@
     document.body.classList.remove("orphan");
   }
 
+  /* A position this window has taken, said on the page for whatever
+     follows the deck from here: the recorder (js/recorder.js) marks each
+     step of a take from it. Said only for a message this window accepted,
+     so a deck that is not its own, filtered out above, is never marked. */
+  function heard(m) {
+    document.dispatchEvent(new CustomEvent("deckstate", { detail: m }));
+  }
+
+  /* The recorder's key, pressed here (a gesture this window's own) or
+     forwarded by the deck (not one). The recorder decides what it means. */
+  function recordKey(gesture) {
+    document.dispatchEvent(new CustomEvent("recordkey", { detail: { gesture: gesture } }));
+  }
+
+  /* A take being recorded holds the controls that would close this window
+     or move the notes out of it: the first press asks, the second ends
+     the take and then does what was asked. `go` is that. Without a take,
+     or without the recorder, nothing is held. */
+  function takeHolds(go) {
+    return !!(window.__take && window.__take.hold(go));
+  }
+
   function listen(ch, probing) {
     if (!ch) return;
     ch.onmessage = function (ev) {
@@ -357,8 +379,8 @@
       if (OWNER && m.tab && m.tab !== OWNER) return;
       /* A probe answers only the state that confirms the staged version;
          everything else still comes from the deck on the old channel. */
-      if (probing) { if (m.type === "state" && version(m.v, true)) { g = m.g; s = m.s; y = m.y; connected(); paint(); } return; }
-      if (m.type === "panel") { panelKey(m.key); return; }
+      if (probing) { if (m.type === "state" && version(m.v, true)) { g = m.g; s = m.s; y = m.y; connected(); paint(); heard(m); } return; }
+      if (m.type === "panel") { if (m.key === "v") recordKey(false); else panelKey(m.key); return; }
       /* A deck window that reloaded asks whether its detached window is
          still open; a window of our own, not the dock's frame, answers.
          A panel opened by hand has no owner and claims nothing: a claim
@@ -373,6 +395,7 @@
       if (typeof m.map === "boolean") elMap.classList.toggle("hidden", !m.map);
       connected();
       paint();
+      heard(m);
     };
     ch.onmessageerror = function () { if (!probing) document.body.classList.add("orphan"); };
   }
@@ -505,6 +528,7 @@
 
   function attach() {
     if (inFrame) return;
+    if (takeHolds(attach)) return;
     send({ type: "attach" });
     window.close();
     /* A window the deck did not open cannot be closed by script, so say
@@ -521,6 +545,7 @@
   /* Close hides the notes, as N does in the deck. The deck opened this
      window, so the deck closes it; one it did not open says so instead. */
   function closeNotes() {
+    if (takeHolds(closeNotes)) return;
     send({ type: "close" });
     if (inFrame) return;
     window.close();
@@ -545,6 +570,7 @@
     } catch (e) { /* not the deck's frame after all */ }
     send({ type: "detach" });
   }
+  window.__moveNotes = moveNotes;      // the dock's "Detach to record" (js/recorder.js)
 
   /* ---- putting a preview away
    *
@@ -701,6 +727,7 @@
     else if (k === "m" || k === "M") send({ type: "map" });
     else if ((k === "n" || k === "N") && !DEVICE) closeNotes();
     else if ((k === "d" || k === "D") && !DEVICE) moveNotes();
+    else if ((k === "v" || k === "V") && !DEVICE) recordKey(true);
     else if (panelKey(k)) { /* handled */ }
     else return;
     ev.preventDefault();
@@ -708,8 +735,13 @@
 
   window.addEventListener("resize", paint);
   /* Both, because `beforeunload` is skipped when a page is put into the
-     back/forward cache and `pagehide` is the one that always fires. */
-  window.addEventListener("beforeunload", function () { if (bus) bus.close(); });
+     back/forward cache and `pagehide` is the one that always fires. Not
+     on `beforeunload` while a take records: the recorder asks there
+     whether to leave, and a speaker who stays would be left with notes
+     deaf to the deck. `pagehide` still closes it if they go. */
+  window.addEventListener("beforeunload", function () {
+    if (bus && !(window.__take && window.__take.running())) bus.close();
+  });
   window.addEventListener("pagehide", function () { if (bus) bus.close(); });
 
   paint();

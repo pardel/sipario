@@ -437,3 +437,58 @@ body.cut #remote-status {
 
 #remote-controls button:active { transform: translateY(1px); border-color: var(--ink-lit); }
 #remote-controls button:focus-visible { outline: 2px solid var(--accent-lit); outline-offset: 2px; }
+
+
+/* ---- recording a take --------------------------------------------------
+   Under the clock and in its dress (js/recorder.js): the button, how long
+   the take has run, and a thin bar of the microphone's level, so a dead
+   input is seen while there is still time to fix it rather than heard
+   afterwards. The notes' bar says REC while a take runs, and says what is
+   wrong with one, since mid-talk the eyes are on the script, not on the
+   side column. Docked, the button alone, which moves the notes to a
+   window of their own, where takes are recorded. */
+
+#rec {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  max-width: 220px;
+}
+
+#rec-btn {
+  padding: 5px 11px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink-lit-faint);
+  background: none;
+  border: 1px solid var(--hairline-deep);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+#rec-btn:hover { color: var(--ink-lit); border-color: var(--hairline-deep-lit); }
+#rec.recording #rec-btn { color: var(--accent-lit); border-color: var(--accent-lit); }
+
+#rec-time {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-lit-faint);
+}
+
+#rec.recording #rec-time { color: var(--ink-lit); }
+
+#rec-level {
+  flex: 1 0 100%;
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--hairline-deep);
+  visibility: hidden;
+}
+
+#rec.recording #rec-level { visibility: visible; }
+#rec-level-bar { display: block; width: 0; height: 100%; background: var(--accent-lit); }
+
+.notes-bar .bar-rec { font-weight: 700; color: var(--accent-lit); }

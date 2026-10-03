@@ -6637,7 +6637,11 @@ check('the notes page says which version it is, and an earlier one can be asked 
   check('recording: the server names the take, one per deck at a time, and appends its slices once each, in order', () => {
     const o = result();
     if (!/^\d{8}-\d{6}-[a-z0-9]{1,4}$/.test(o.first.take)) throw new Error(`the take is named ${o.first.take}`);
-    eq(o.idFormat.slice().sort().join(' '), o.idFormat.join(' '), 'names that sort in the order the takes began');
+    /* To the second: two begun within one second are told apart by the
+       suffix, which says nothing of which came first. */
+    const secs = o.idFormat.map((id) => id.slice(0, 15));
+    eq(secs.slice().sort().join(' '), secs.join(' '), 'names that sort in the order the takes began');
+    for (const id of o.idFormat) if (!/^\d{8}-\d{6}-[a-z0-9]{1,4}$/.test(id)) throw new Error(`a take is named ${id}`);
     eq(o.first.audio, 'take.webm', 'its audio named from what the browser records');
     eq(o.second.status, 409, 'a second take of the deck is refused while the first records');
     if (!/already recording/.test(o.second.body)) throw new Error(`the refusal says ${o.second.body}`);
@@ -6705,6 +6709,260 @@ check('the notes page says which version it is, and an earlier one can be asked 
        listener is on every interface when there is no room. */
     if (!/serve\([^)]*record: false/.test(fs.readFileSync(path.join(ROOT, 'lib/export.js'), 'utf8'))) {
       throw new Error('the export serves the talk without saying `record: false`');
+    }
+  });
+}
+
+{
+  /* The notes window's half of a take, in a page with no microphone and
+     no server: the real notes page, its real scripts, and the browser's
+     recorder, microphone, audio and fetch stood in for, so what is under
+     test is what the recorder does with them. Run in a process of its
+     own, because a take is promises from end to end and a check here is
+     not; and with a clock the probe holds, so a moment the deck stamps
+     and the moment the take began are numbers it chose. */
+  const page = pagesLib.presenterPage(MOVES_DECK, 9999, 'v1').replace(/<script[^>]*><\/script>/g, '');
+  let ran = null;
+  const notesRun = () => {
+    if (ran) return ran;
+    const probe = `
+      const fs = require('fs'), path = require('path');
+      const { JSDOM, VirtualConsole } = require(${JSON.stringify(require.resolve('jsdom'))});
+      const read = (f) => fs.readFileSync(path.join(${JSON.stringify(ROOT)}, f), 'utf8');
+      const PAGE = ${JSON.stringify(page)};
+      const KEY = ${JSON.stringify(MOVES_DECK.deck.key)};
+      const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+      function makeBus() {
+        const peers = [];
+        return function Channel(name) {
+          this.name = name; this.onmessage = null;
+          this.close = () => { const i = peers.indexOf(this); if (i > -1) peers.splice(i, 1); };
+          this.postMessage = (data) => {
+            for (const p of peers.slice()) if (p !== this && p.name === this.name && p.onmessage) p.onmessage({ data });
+          };
+          peers.push(this);
+        };
+      }
+      /* One window, and everything it would reach for, logged in one
+         sequence so an order can be asserted. */
+      function notes(url, parent) {
+        const log = [], errors = [], recorders = [], asked = [];
+        const con = new VirtualConsole();
+        con.on('jsdomError', (e) => errors.push(String((e.detail && e.detail.stack) || e.message)));
+        const dom = new JSDOM(PAGE, { runScripts: 'outside-only', pretendToBeVisual: true, url, virtualConsole: con });
+        const w = dom.window;
+        const Bus = makeBus();
+        const clock = { now: 0, origin: 1000, date: 0, level: 0.2 };
+        w.BroadcastChannel = Bus;
+        w.EventSource = function () { this.addEventListener = () => {}; this.close = () => {}; };
+        Object.defineProperty(w, 'performance', { value: { get timeOrigin() { return clock.origin; }, now: () => clock.now }, configurable: true });
+        const realNow = w.Date.now;
+        w.Date.now = () => realNow() + clock.date;
+        if (parent) w.parent = parent;
+        let takes = 0;
+        w.fetch = (u, o) => {
+          const body = o && o.body;
+          const entry = { url: u.replace(/\\?.*$/, ''), query: u.split('?')[1] || '' };
+          if (typeof body === 'string') entry.body = JSON.parse(body);
+          else if (body) entry.slice = body.tag;
+          log.push(entry);
+          const p = entry.url;
+          const b = entry.body || {};
+          const answer = p === '/record/start' ? { ok: true, take: 'take-' + (++takes), audio: 'take.webm' }
+            : p === '/record/chunk' ? { ok: true }
+            : p === '/record/marks' ? { ok: true, have: b.from + b.marks.length }
+            : p === '/record/finish' ? { ok: true, take: b.take, marks: 0 }
+            : null;
+          if (!answer) return Promise.reject(new Error('no network in a test'));
+          return wait(1).then(() => ({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(answer)) }));
+        };
+        const track = { stopped: 0, getSettings: () => ({ channelCount: 1, sampleRate: 48000 }), stop() { this.stopped++; } };
+        Object.defineProperty(w.navigator, 'mediaDevices', { configurable: true, value: {
+          getUserMedia: (c) => { asked.push(c); log.push({ url: 'getUserMedia' }); return Promise.resolve({ getAudioTracks: () => [track], getTracks: () => [track] }); },
+        } });
+        function MediaRecorder(stream, opts) { this.mimeType = opts.mimeType; this.state = 'inactive'; recorders.push(this); }
+        MediaRecorder.isTypeSupported = (t) => t === 'audio/webm;codecs=opus';
+        MediaRecorder.prototype.start = function (ts) { this.state = 'recording'; this.timeslice = ts; this.at = clock.now; };
+        MediaRecorder.prototype.slice = function (tag) { const b = new w.Blob([tag]); b.tag = tag; this.ondataavailable({ data: b }); };
+        MediaRecorder.prototype.stop = function () {
+          this.state = 'inactive';
+          setTimeout(() => { this.slice('last'); this.onstop(); }, 1);
+        };
+        w.MediaRecorder = MediaRecorder;
+        w.AudioContext = function () {
+          this.state = 'running';
+          this.resume = () => {};
+          this.createAnalyser = () => ({ fftSize: 0, getFloatTimeDomainData: (buf) => buf.fill(clock.level) });
+          this.createMediaStreamSource = () => ({ connect() {}, disconnect() {} });
+        };
+        for (const f of ['js/events.js', 'js/presenter.js', 'js/recorder.js']) w.eval(read(f));
+        w.document.dispatchEvent(new w.Event('DOMContentLoaded'));
+        const deck = new Bus(KEY);
+        deck.onmessage = (e) => { if (e.data.from === 'presenter') log.push({ bus: e.data.type }); };
+        const state = (id, at, more = {}) => deck.postMessage({ from: 'deck', type: 'state', tab: 'T', g: 0, s: 0, y: 0, v: 'v1', id, at, ...more });
+        const key = (k) => w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: k }));
+        const $ = (id) => w.document.getElementById(id);
+        return { w, log, errors, recorders, asked, clock, track, deck, state, key, $ };
+      }
+      (async () => {
+        const out = {};
+        const n = notes('http://localhost:9999/presenter?tab=T');
+        const { clock, state, key, $, log } = n;
+        state('first', 400);
+        out.ui = { button: $('rec-btn') && $('rec-btn').textContent, inSide: !!$('side').querySelector('#rec'),
+                   bar: !!$('notes-bar').querySelector('#rec-on') && !!$('notes-bar').querySelector('#rec-alert') };
+
+        /* V from the deck before any take: no gesture here, so it says so. */
+        n.deck.postMessage({ from: 'deck', type: 'panel', tab: 'T', key: 'v' });
+        await wait(5);
+        out.forwardedFirst = { note: $('timer-note').textContent, asked: n.asked.length };
+
+        /* The first take, from V pressed here. */
+        clock.now = 10000;
+        key('V');
+        await wait(20);
+        const anchor = clock.origin + clock.now;
+        out.started = { button: $('rec-btn').textContent, rec: $('rec-on').textContent, recording: n.w.document.body.classList.contains('recording'),
+                        constraints: n.asked[0], timeslice: n.recorders[0] && n.recorders[0].timeslice, mime: n.recorders[0] && n.recorders[0].mimeType };
+        state('b', anchor + 1000);
+        state('b', anchor + 1000);                       // said again: a hello, the map toggled
+        state('c', anchor + 1010);                       // a 10 ms flash
+        state('elsewhere', anchor + 1500, { tab: 'OTHER' });   // another deck window's
+        state('b', anchor + 2500.4);
+        state(undefined, anchor + 2600);                 // a deck that does not say its step
+        n.recorders[0].slice('s0');
+        await wait(20);
+        clock.now = 13000;
+        key('v');
+        await wait(30);
+        out.first = { log: log.slice(), stopped: n.track.stopped, button: $('rec-btn').textContent,
+                      recording: n.w.document.body.classList.contains('recording'), note: $('timer-note').textContent };
+        log.length = 0;
+
+        /* The second, from V forwarded by the deck: allowed now. */
+        state('d', clock.origin + 15000);
+        clock.now = 20000;
+        n.deck.postMessage({ from: 'deck', type: 'panel', tab: 'T', key: 'v' });
+        await wait(20);
+        out.forwardedAfter = { asked: n.asked.length, button: $('rec-btn').textContent };
+        /* The level: silence for longer than two seconds, and enough
+           readings to say so, is said in the bar; sound clears it. */
+        clock.level = 0;
+        await wait(200);
+        clock.date = 5000;
+        await wait(1500);
+        out.silent = $('rec-alert').textContent;
+        clock.level = 0.4;
+        await wait(400);
+        out.heard = $('rec-alert').textContent;
+
+        /* N, the notes' own close, while it records: asked first. */
+        key('N');
+        await wait(10);
+        out.asked = { note: $('timer-note').textContent, closed: log.some((e) => e.bus === 'close') };
+        key('N');
+        await wait(40);
+        out.second = { log: log.slice() };
+        out.errors = n.errors;
+
+        /* Docked: the control that moves the notes to where takes are made. */
+        const parent = { moved: 0, __toggleDetached() { this.moved++; } };
+        const d = notes('http://localhost:9999/presenter?tab=T', parent);
+        d.state('first', 400);
+        d.$('rec-btn').dispatchEvent(new d.w.MouseEvent('click', { bubbles: true }));
+        d.key('V');
+        out.dock = { button: d.$('rec-btn').textContent, moved: parent.moved, note: d.$('timer-note').textContent,
+                     asked: d.asked.length, bar: !!d.$('rec-on'), errors: d.errors };
+
+        /* Opened by hand, for no deck window in particular: nothing. */
+        const h = notes('http://localhost:9999/presenter');
+        out.hand = { rec: !!h.$('rec'), errors: h.errors };
+        console.log(JSON.stringify(out));
+        process.exit(0);
+      })().catch((e) => { console.log(JSON.stringify({ error: e.stack })); process.exit(0); });
+    `;
+    const r = require('child_process').spawnSync(process.execPath, ['-e', probe], { encoding: 'utf8', timeout: 30000 });
+    try { ran = JSON.parse(r.stdout.trim().split('\n').pop()); } catch { ran = { error: `no output (${r.status}): ${r.stdout} ${r.stderr}` }; }
+    return ran;
+  };
+  const notesOut = () => {
+    const o = notesRun();
+    if (o.error) throw new Error(o.error);
+    return o;
+  };
+
+  check('recording: the notes window records from V, with the browser\'s processing off, and marks the step it opens on', () => {
+    const o = notesOut();
+    eq(`${o.ui.button} ${o.ui.inSide} ${o.ui.bar}`, 'record true true', 'a record button by the clock, and a place in the bar');
+    eq(o.forwardedFirst.asked, 0, 'V from the deck before any take starts nothing');
+    if (!/Press V here, in the notes window/.test(o.forwardedFirst.note)) throw new Error(`it said ${o.forwardedFirst.note}`);
+    eq(`${o.started.button} ${o.started.recording}`, 'stop true', 'V pressed here starts a take');
+    if (!/^REC/.test(o.started.rec)) throw new Error(`the bar says ${o.started.rec}`);
+    const a = o.started.constraints && o.started.constraints.audio;
+    eq(JSON.stringify(a), JSON.stringify({ echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+      channelCount: { ideal: 1 }, sampleRate: { ideal: 48000 } }), 'the microphone asked for unprocessed, mono, 48 kHz');
+    eq(`${o.started.mime} ${o.started.timeslice}`, 'audio/webm;codecs=opus 5000', 'Opus in WebM, a slice every five seconds');
+    const start = o.first.log.find((e) => e.url === '/record/start');
+    eq(JSON.stringify(start.body.settings), JSON.stringify({ channelCount: 1, sampleRate: 48000 }), 'what the microphone gave is sent with the start');
+    eq(start.body.mime, 'audio/webm;codecs=opus', 'and what the recorder makes');
+  });
+
+  check('recording: every change of step is a mark, a 10 ms flash included, timed from the deck\'s stamp; only repeats are dropped', () => {
+    const o = notesOut();
+    const sent = o.first.log.filter((e) => e.url === '/record/marks').map((e) => e.body);
+    /* Sent as they happen, each batch from where the server's copy ends. */
+    let have = 0;
+    const all = [];
+    for (const b of sent) { eq(b.from <= have, true, 'no batch starts past the server\'s copy'); all.splice(b.from, b.marks.length, ...b.marks); have = all.length; }
+    eq(all.map((m) => `${m.id}@${m.t}`).join(' '), 'first@0 b@1 c@1.01 b@2.5',
+      'the step on screen at the start, then each change, from the stamp, to the millisecond');
+    eq(all.every((m) => m.v === 'v1'), true, 'each naming the version of the deck that showed it');
+    if (sent.length < 2) throw new Error('the marks went in one batch at the end, not as they happened');
+  });
+
+  check('recording: slices go in order as they come, and the take is finished only after the last of them', () => {
+    const o = notesOut();
+    const seen = o.first.log.map((e) => (e.url === '/record/chunk' ? `chunk:${e.slice}:${e.query.split('seq=')[1]}` : e.url));
+    const chunks = seen.filter((x) => x.startsWith('chunk:'));
+    eq(chunks.join(' '), 'chunk:s0:0 chunk:last:1', 'each slice once, numbered in order, the last one too');
+    eq(seen[seen.length - 1], '/record/finish', 'finished last');
+    eq(seen.indexOf('/record/start') < seen.indexOf('chunk:s0:0'), true, 'started first');
+    eq(o.first.log.find((e) => e.url === '/record/finish').body.length, 3, 'with how long it ran');
+    eq(`${o.first.stopped} ${o.first.button} ${o.first.recording}`, '1 record false', 'the microphone let go, and ready for another');
+    if (!/kept/.test(o.first.note)) throw new Error(`it did not say the take was kept: ${o.first.note}`);
+  });
+
+  check('recording: after the first take V from the deck starts and stops one, and silence on the input is said in the bar', () => {
+    const o = notesOut();
+    eq(`${o.forwardedAfter.asked} ${o.forwardedAfter.button}`, '2 stop', 'V from the deck started the second take');
+    if (!/No sound/.test(o.silent)) throw new Error(`two seconds of silence said nothing: "${o.silent}"`);
+    eq(o.heard, '', 'and sound clears it');
+  });
+
+  check('recording: the notes\' own close asks while a take records, and closes only once the take is finished', () => {
+    const o = notesOut();
+    if (!/A take is recording\. Press again/.test(o.asked.note)) throw new Error(`the first press said ${o.asked.note}`);
+    eq(o.asked.closed, false, 'the first press closes nothing');
+    const seen = o.second.log.map((e) => e.bus || e.url);
+    const fin = seen.lastIndexOf('/record/finish');
+    if (fin < 0) throw new Error(`the take was not finished: ${seen.join(' ')}`);
+    eq(seen.indexOf('close') > fin, true, 'the second finishes the take, then closes the notes');
+    eq(o.errors.length, 0, `no errors in the page (${o.errors[0]})`);
+  });
+
+  check('recording: docked, the notes offer to detach to record, and a window opened by hand records nothing', () => {
+    const o = notesOut();
+    eq(o.dock.button, 'Detach to record', 'the dock\'s control');
+    eq(o.dock.moved, 1, 'which moves the notes by the path D takes');
+    eq(`${o.dock.asked} ${o.dock.bar}`, '0 false', 'no microphone asked for in the dock');
+    if (!/own window/.test(o.dock.note)) throw new Error(`V in the dock said ${o.dock.note}`);
+    eq(o.dock.errors.length, 0, `no errors in the dock (${o.dock.errors[0]})`);
+    eq(o.hand.rec, false, 'nothing to record with in a window that follows no deck in particular');
+    const device = pagesLib.presenterPage(MOVES_DECK, 9999, 'v1', 'device');
+    const here = pagesLib.presenterPage(MOVES_DECK, 9999, 'v1', 'notes');
+    eq(device.includes('/js/recorder.js'), false, 'the notes on another device never load the recorder');
+    if (!/<script src="\/js\/presenter\.js"><\/script>\s*<script src="\/js\/recorder\.js"><\/script>/.test(here)) {
+      throw new Error('the notes on this machine do not load the recorder after the notes');
     }
   });
 }
