@@ -115,6 +115,7 @@ the same one.
 | `sipario export pptx [dir]` | the deck as PowerPoint, a picture per step, the script in its notes |
 | `sipario results [dir]` | what the room said in the latest session, as JSON and CSV in the current folder |
 | `sipario takes [dir]` | the takes recorded of the deck, oldest first; `takes recover <take>` finishes one left unfinished |
+| `sipario voice [dir]` | the script read in your own voice, cloned from your latest live take, as a new take ([docs/VOICE.md](docs/VOICE.md)) |
 
 `sipario-serve` and `sipario-renumber` are the same two commands under
 their own names, for the talks that already have them in their npm
@@ -384,6 +385,24 @@ and `sipario takes recover <take>` finishes it. `export video` uses the
 latest finished take, and says so when a newer one was left unfinished. The
 video is made by ffmpeg, borrowed from the machine like the browser
 (`SIPARIO_FFMPEG` names one PATH would miss).
+
+## A voice for the script
+
+```bash
+npx sipario voice               # every step's script, read in the voice of your latest live take
+npx sipario export video        # the video of that voiced take
+```
+
+A voice engine on your machine listens to ten seconds of speech cut from
+your latest live take, then reads every step's notes aloud in that voice,
+into a new take beside the live one; a step with no script is held silent
+for two seconds (`--hold` changes it). The engine is not part of sipario:
+`SIPARIO_TTS` names one, and [docs/VOICE.md](docs/VOICE.md) sets up
+Chatterbox, a local model under the MIT licence, as one, and gives the
+protocol any other engine can speak. Only your own live takes are cloned,
+never a voiced one, and every Chatterbox clip carries its maker's
+inaudible watermark, which sipario keeps. Each step's clip is kept, so a
+run stopped part way picks up where it stopped.
 
 ## Using it as a library
 
