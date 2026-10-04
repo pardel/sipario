@@ -329,3 +329,10 @@ service behind a small script, or `say` on a Mac for a quick listen to the
 pacing (no clone, and a different `engine` name, so its clips never mix
 with Chatterbox's in the cache). The sample is passed with every request;
 an engine that does not clone may ignore it.
+
+When the engine is a script that starts another program (a venv's Python,
+a client for a hosted service), start that program with `exec`, so the
+process sipario runs is the engine and not a shell waiting on it. sipario
+stops a run by killing the engine's whole process group, which reaches a
+program left as the script's child; one an engine moves into a group of
+its own is the engine's to stop.

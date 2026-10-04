@@ -6459,8 +6459,11 @@ check('the notes page says which version it is, and an earlier one can be asked 
      from clips that need converting and clips that do not. Told by its
      environment to misbehave, after FAKE_TTS_AFTER good answers: `hang`
      before it is ready, `junk` on stdout, `die` part way through writing
-     a clip, `error` for an answer, `stall` without one. FAKE_TTS_LOG
-     collects every request it is sent. */
+     a clip, `error` for an answer, `stall` without one, `late` with one
+     that comes after the request's time. FAKE_TTS_LINGER is how long it
+     stays once its stdin closes, in milliseconds or `forever`.
+     FAKE_TTS_LOG collects every request it is sent, and FAKE_TTS_PID its
+     own process id, which is the engine's even when a script runs it. */
   function fakeTts() {
     const fs = require('fs');
     const mode = process.env.FAKE_TTS || '';
@@ -6476,6 +6479,7 @@ check('the notes page says which version it is, and an earlier one can be asked 
       for (let i = 0; i < frames; i++) b.writeInt16LE(Math.round(9000 * Math.sin(2 * Math.PI * 220 * i / rate)), 44 + i * 2);
       return b;
     };
+    if (process.env.FAKE_TTS_PID) fs.appendFileSync(process.env.FAKE_TTS_PID, `${process.pid}\n`);
     process.stderr.write('fake: loading the model\n');
     if (mode === 'hang') return setInterval(() => {}, 1000);
     process.stdout.write(JSON.stringify({ ready: true, engine: 'fake', sr: 24000 }) + '\n');
@@ -6488,6 +6492,9 @@ check('the notes page says which version it is, and an earlier one can be asked 
       if (now && mode === 'junk') return process.stdout.write('generating ' + req.id + '...\n');
       if (now && mode === 'stall') return null;
       if (now && mode === 'error') return reply({ id: req.id, ok: false, error: 'no voice for that' });
+      if (now && mode === 'late') {
+        return setTimeout(() => { fs.writeFileSync(req.out, wav(req.text, 24000)); reply({ id: req.id, ok: true, out: req.out }); }, 800);
+      }
       if (now && mode === 'die') {
         fs.writeFileSync(req.out, wav(req.text, 24000).subarray(0, 100));
         process.stderr.write('fake: out of memory\n');
@@ -6507,7 +6514,9 @@ check('the notes page says which version it is, and an earlier one can be asked 
         if (line.trim()) answer(JSON.parse(line));
       }
     });
-    process.stdin.on('end', () => process.exit(0));
+    const linger = process.env.FAKE_TTS_LINGER;
+    process.stdin.on('end', () => (linger === 'forever' ? setInterval(() => {}, 1000)
+      : setTimeout(() => process.exit(0), Number(linger || 0))));
     return null;
   }
   const fakeAt = (dir) => {
@@ -6587,15 +6596,31 @@ check('the notes page says which version it is, and an earlier one can be asked 
   const engineRuns = (() => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sipario-tts-'));
     const bin = fakeAt(dir);
+    /* The engine behind a script, as a venv's often is, written without
+       `exec`: the script is the process sipario starts, the engine its
+       child. */
+    const wrap = path.join(dir, 'wrap.sh');
+    fs.writeFileSync(wrap, `#!/bin/sh\n'${process.execPath}' '${bin}'\n`);
+    fs.chmodSync(wrap, 0o755);
     const probe = `
       const fs = require('fs');
       const path = require('path');
       const tts = require(${JSON.stringify(path.join(ROOT, 'lib/tts.js'))});
       const dir = ${JSON.stringify(dir)};
       const bin = ${JSON.stringify(bin)};
+      const wrap = ${JSON.stringify(wrap)};
+      const pids = path.join(dir, 'pids');
       const sink = { write() {} };
       const list = (d) => fs.readdirSync(d).sort();
-      const start = (more, readyTimeout = 10000) => tts.startEngine(bin, { env: { ...process.env, ...more }, log: sink, readyTimeout });
+      const start = (more, readyTimeout = 10000, how = {}) => tts.startEngine(how.bin || bin,
+        { env: { ...process.env, FAKE_TTS_PID: pids, ...more }, log: how.log || sink, readyTimeout });
+      /* The engine's own process, by the id it wrote; gone means gone, so a
+         killed one is waited on until it is reaped. */
+      const lastPid = () => Number(fs.readFileSync(pids, 'utf8').trim().split('\\n').pop());
+      const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+      const gone = async (pid) => { for (let i = 0; i < 40 && alive(pid); i++) await wait(50); return !alive(pid); };
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const listening = () => process.listenerCount('SIGINT') + process.listenerCount('SIGTERM');
       const room = (name) => { const d = path.join(dir, name); fs.mkdirSync(d); return d; };
       const req = (d, id, text) => ({ id, text, sample: path.join(dir, 'sample.wav'), out: path.join(d, id + '.wav') });
       const caught = async (p) => { try { await p; return null; } catch (e) { return e.message; } };
@@ -6614,6 +6639,7 @@ check('the notes page says which version it is, and an earlier one can be asked 
         {
           const t0 = Date.now();
           out.hang = { error: await caught(start({ FAKE_TTS: 'hang' }, 400)), ms: Date.now() - t0 };
+          out.hang.stopped = await gone(lastPid());
         }
         {
           const d = room('junk');
@@ -6641,6 +6667,49 @@ check('the notes page says which version it is, and an earlier one can be asked 
           const e = await start({ FAKE_TTS: 'stall' });
           out.stall = { error: await caught(tts.clip(e, req(d, 'one', 'Hello.'), { timeout: 300 })), files: list(d) };
           await e.close();
+        }
+        {
+          /* Behind a script, timed out, and slow rather than stuck: killed
+             alone, the script would leave the engine to write its clip
+             after the name it was handed had been cleared away. A model
+             busy generating does not see its stdin close, so this one
+             stays on when it does. */
+          const d = room('orphan');
+          const e = await start({ FAKE_TTS: 'late', FAKE_TTS_LINGER: 'forever' }, 10000, { bin: wrap });
+          const pid = lastPid();
+          const error = await caught(tts.clip(e, req(d, 'one', 'Hello.'), { timeout: 300 }));
+          await wait(1200);
+          out.orphan = { error, stopped: !alive(pid), files: list(d) };
+        }
+        {
+          const d = room('linger');
+          const said = [];
+          tts.LIMITS.close = 500;
+          const e = await start({ FAKE_TTS_LINGER: 'forever' }, 10000, { bin: wrap, log: { write: (c) => said.push(String(c)) } });
+          const pid = lastPid();
+          await tts.clip(e, req(d, 'one', 'Hello.'));
+          const error = await caught(e.close());
+          out.linger = { error, stopped: await gone(pid), said: said.join(''), files: list(d) };
+          tts.LIMITS.close = 5000;
+        }
+        {
+          const e = await start({ FAKE_TTS: 'stall' });
+          const pid = lastPid();
+          const p = caught(tts.clip(e, req(room('sigsay'), 'one', 'Hello.')));
+          setTimeout(() => process.kill(process.pid, 'SIGINT'), 100);
+          out.sigsay = { error: await p, stopped: await gone(pid), listening: listening() };
+        }
+        {
+          const e = await start({ FAKE_TTS_LINGER: '1500' });
+          const pid = lastPid();
+          await tts.clip(e, req(room('sigclose'), 'one', 'Hello.'));
+          const p = caught(e.close());
+          setTimeout(() => process.kill(process.pid, 'SIGINT'), 200);
+          out.sigclose = { error: await p, stopped: await gone(pid), listening: listening() };
+        }
+        /* Nothing this probe started outlives it, whatever the checks find. */
+        for (const pid of fs.readFileSync(pids, 'utf8').trim().split('\\n').map(Number)) {
+          if (alive(pid)) { try { process.kill(pid, 'SIGKILL'); } catch {} }
         }
         console.log(JSON.stringify(out));
       })().catch((e) => console.log(JSON.stringify({ crashed: e.stack })));
@@ -6677,6 +6746,7 @@ check('the notes page says which version it is, and an earlier one can be asked 
       throw new Error(`it said ${o.error}`);
     }
     if (o.ms > 5000) throw new Error(`it took ${o.ms}ms to give up`);
+    eq(o.stopped, true, 'and the engine is gone, not left loading');
   });
 
   check('voice: a line on the engine\'s stdout that is not the protocol is named, and nothing is kept for it', () => {
@@ -6704,6 +6774,32 @@ check('the notes page says which version it is, and an earlier one can be asked 
     eq(`${o.error.files.length} ${o.error.closed}`, '0 true', 'nothing kept, and the engine still closed cleanly');
     if (!/did not answer for one within 0\.3s, and was stopped/.test(o.stall.error || '')) throw new Error(`it said ${o.stall.error}`);
     eq(o.stall.files.length, 0, 'nothing kept for it');
+  });
+
+  check('voice: an engine run by a script without exec is stopped whole at a timeout, and writes nothing late', () => {
+    const o = ran().orphan;
+    if (!/did not answer for one within 0\.3s, and was stopped/.test(o.error || '')) throw new Error(`it said ${o.error}`);
+    eq(o.stopped, true, 'the engine behind the script is gone, not left running');
+    eq(o.files.length, 0, 'and nothing was written beside the cache after the run gave up on it');
+  });
+
+  check('voice: an engine that will not exit when its input closes is stopped whole, and said, and the clips stand', () => {
+    const o = ran().linger;
+    eq(o.error, null, 'every clip was in, so closing is not a failure');
+    if (!/\[voice\] the voice engine \S+ did not exit within 0\.5s of its input closing, and was stopped/.test(o.said)) {
+      throw new Error(`it was not said: ${o.said}`);
+    }
+    eq(o.stopped, true, 'the engine behind the script is gone');
+    eq(o.files.join(' '), 'one.wav', 'the clip it made is kept');
+    eq(`${engineRuns.status} ${engineRuns.signal}`, '0 null', 'and nothing held this process open after it was done');
+  });
+
+  check('voice: Ctrl-C stops the engine whole and the run with it, while it speaks and while it closes', () => {
+    const o = ran();
+    eq(o.sigsay.error, 'stopped by SIGINT', 'a request waiting is refused');
+    eq(`${o.sigsay.stopped} ${o.sigsay.listening}`, 'true 0', 'the engine gone, and the handler taken away');
+    eq(o.sigclose.error, 'stopped by SIGINT', 'while it closes too, rather than the run going on to make a take');
+    eq(`${o.sigclose.stopped} ${o.sigclose.listening}`, 'true 0', 'the engine gone, and the handler taken away');
   });
 
   /* The command, end to end: a talk, a live take of tone to clone, the
@@ -6851,6 +6947,31 @@ check('the notes page says which version it is, and an earlier one can be asked 
       if (!/21 voiced by fake \(18 new, 3 cached\)/.test(again.stdout)) throw new Error(`it said ${again.stdout}`);
       for (const id of first) if (!new RegExp(`${id}: \\d+\\.\\d\\ds, cached`).test(again.stderr)) throw new Error(`${id} was not taken from the cache`);
       eq(r.heard().some((q) => first.includes(q.id)), false, 'the clips kept were not asked for again');
+    } finally {
+      r.done();
+    }
+  });
+
+  whenFf('voice: Ctrl-C while the take is put together stops the run, and leaves no take and no half of one', () => {
+    /* The signal comes from an ffmpeg that sends it to sipario as it is
+       asked to convert a clip, the step after the engine has gone, while
+       sipario waits on it. */
+    const r = rig();
+    try {
+      const shim = path.join(r.dir, 'ffmpeg');
+      fs.writeFileSync(shim, `#!${process.execPath}
+const { spawnSync } = require('child_process');
+const args = process.argv.slice(2);
+if (args.some((a) => a.includes(${JSON.stringify(`${path.sep}voice${path.sep}`)}))) process.kill(process.ppid, 'SIGINT');
+const r = spawnSync(${JSON.stringify(ff)}, args, { stdio: 'inherit' });
+process.exit(r.status === null ? 1 : r.status);
+`);
+      fs.chmodSync(shim, 0o755);
+      const res = r.run(['voice'], { SIPARIO_FFMPEG: shim });
+      eq(`${res.status} ${res.signal}`, '1 null', `it stopped as a failure, not killed (${res.stderr.trim().split('\n').pop()})`);
+      if (!/\[voice\] stopped by SIGINT/.test(res.stderr)) throw new Error(`it said ${res.stderr}`);
+      eq(fs.readdirSync(path.dirname(r.take)).join(' '), r.takeId, 'no take, finished or not, beside the live one');
+      eq(fs.readdirSync(r.cache).length, 21, 'every clip kept for the next run');
     } finally {
       r.done();
     }
