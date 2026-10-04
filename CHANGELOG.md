@@ -30,7 +30,10 @@ so a break ships as a minor and this file is the whole of the warning.
   script, so a run stopped part way picks up where it stopped while the
   engine and the take it clones stay the same. A voiced take is never
   cloned from. docs/VOICE.md gives the engine protocol and sets up
-  Chatterbox, whose watermark is kept. `sipario takes` and `export
+  Qwen3-TTS as the recommended engine, the one that sounded most like a
+  British speaker's own voice, with an adapter that transcribes the sample,
+  levels it and applies Perth's watermark; and Chatterbox as the lighter
+  alternative, whose own watermark is kept. `sipario takes` and `export
   video` say which live take a voiced one came from.
 
 ## 0.6.0 — 2026-10-01

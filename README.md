@@ -397,13 +397,15 @@ A voice engine on your machine listens to ten seconds of speech cut from
 your latest live take, then reads every step's notes aloud in that voice,
 into a new take beside the live one; a step with no script is held silent
 for two seconds (`--hold` changes it). The engine is not part of sipario:
-`SIPARIO_TTS` names one, and [docs/VOICE.md](docs/VOICE.md) sets up
-Chatterbox, a local model under the MIT licence, as one, and gives the
-protocol any other engine can speak. The voice is cloned only from a live
-take, never a voiced one, but sipario cannot tell whose voice is on a live
-take: if someone else gave the talk with V on, it is theirs, so voice a
-deck only from a take of your own. Every Chatterbox clip carries its
-maker's inaudible watermark, which sipario keeps. Each step's clip is
+`SIPARIO_TTS` names one. [docs/VOICE.md](docs/VOICE.md) sets up
+Qwen3-TTS, a local model under the Apache-2.0 licence, as the recommended
+one, Chatterbox (MIT) as a lighter alternative, and gives the protocol any
+other engine can speak. The voice is cloned only from a live take, never a
+voiced one, but sipario cannot tell whose voice is on a live take: if
+someone else gave the talk with V on, it is theirs, so voice a deck only
+from a take of your own. Every clip from either engine carries Resemble
+AI's inaudible Perth watermark, applied by Chatterbox itself and by the
+Qwen3-TTS adapter, and sipario keeps it. Each step's clip is
 kept, so a run stopped part way picks up where it stopped, as long as it
 clones the same take: a newer live take voices every step again, and
 `--from` names the old one to keep its clips.
