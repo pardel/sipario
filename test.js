@@ -6456,11 +6456,15 @@ check('the notes page says which version it is, and an earlier one can be asked 
      executable of its own, speaking the protocol, with a sine for a voice
      whose length follows the script's, at 24 kHz for the first request
      and every other one after, 16 kHz between, so the take is assembled
-     from clips that need converting and clips that do not. Told by its
+     from clips that need converting and clips that do not. Seven frames
+     over twenty milliseconds a character, so no clip is a whole number of
+     ten milliseconds, as a real engine's seldom is: a step's place
+     rounded to the hundredth, as ffmpeg times a file, would show. Told by its
      environment to misbehave, after FAKE_TTS_AFTER good answers: `hang`
      before it is ready, `junk` on stdout, `die` part way through writing
      a clip, `error` for an answer, `stall` without one, `late` with one
-     that comes after the request's time. FAKE_TTS_LINGER is how long it
+     that comes after the request's time, `cut` and `empty` saying ok over
+     a clip cut short and one with no audio in it. FAKE_TTS_LINGER is how long it
      stays once its stdin closes, in milliseconds or `forever`.
      FAKE_TTS_LOG collects every request it is sent, and FAKE_TTS_PID its
      own process id, which is the engine's even when a script runs it. */
@@ -6469,8 +6473,7 @@ check('the notes page says which version it is, and an earlier one can be asked 
     const mode = process.env.FAKE_TTS || '';
     const after = Number(process.env.FAKE_TTS_AFTER || 0);
     const heard = process.env.FAKE_TTS_LOG;
-    const wav = (text, rate) => {
-      const frames = Math.round(rate * 0.02 * text.length);
+    const wav = (text, rate, frames = Math.round(rate * 0.02 * text.length) + 7) => {
       const b = Buffer.alloc(44 + frames * 2);
       b.write('RIFF', 0); b.writeUInt32LE(36 + frames * 2, 4); b.write('WAVEfmt ', 8);
       b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20); b.writeUInt16LE(1, 22); b.writeUInt32LE(rate, 24);
@@ -6492,6 +6495,10 @@ check('the notes page says which version it is, and an earlier one can be asked 
       if (now && mode === 'junk') return process.stdout.write('generating ' + req.id + '...\n');
       if (now && mode === 'stall') return null;
       if (now && mode === 'error') return reply({ id: req.id, ok: false, error: 'no voice for that' });
+      if (now && (mode === 'cut' || mode === 'empty')) {
+        fs.writeFileSync(req.out, mode === 'cut' ? wav(req.text, 24000).subarray(0, 100) : wav('', 24000, 0));
+        return reply({ id: req.id, ok: true, out: req.out });
+      }
       if (now && mode === 'late') {
         return setTimeout(() => { fs.writeFileSync(req.out, wav(req.text, 24000)); reply({ id: req.id, ok: true, out: req.out }); }, 800);
       }
@@ -6668,6 +6675,12 @@ check('the notes page says which version it is, and an earlier one can be asked 
           out.stall = { error: await caught(tts.clip(e, req(d, 'one', 'Hello.'), { timeout: 300 })), files: list(d) };
           await e.close();
         }
+        for (const mode of ['cut', 'empty']) {
+          const d = room(mode);
+          const e = await start({ FAKE_TTS: mode });
+          out[mode] = { error: await caught(tts.clip(e, req(d, 'one', 'Hello.'))), files: list(d) };
+          await e.close();
+        }
         {
           /* Behind a script, timed out, and slow rather than stuck: killed
              alone, the script would leave the engine to write its clip
@@ -6736,8 +6749,8 @@ check('the notes page says which version it is, and an earlier one can be asked 
         throw new Error(`the engine was handed ${q.out}: a name of sipario's ending .wav, not the kept one`);
       }
     }
-    eq(o.a.frames, Math.round(24000 * 0.02 * 'Hello there.'.length), 'the first clip read exactly from its header');
-    eq(`${o.b.rate} ${o.b.frames}`, `16000 ${Math.round(16000 * 0.02 * 'And once again, a little longer.'.length)}`, 'and the second');
+    eq(o.a.frames, Math.round(24000 * 0.02 * 'Hello there.'.length) + 7, 'the first clip read exactly from its header');
+    eq(`${o.b.rate} ${o.b.frames}`, `16000 ${Math.round(16000 * 0.02 * 'And once again, a little longer.'.length) + 7}`, 'and the second');
   });
 
   check('voice: an engine that never says it is ready is stopped at the timeout, and named', () => {
@@ -6774,6 +6787,16 @@ check('the notes page says which version it is, and an earlier one can be asked 
     eq(`${o.error.files.length} ${o.error.closed}`, '0 true', 'nothing kept, and the engine still closed cleanly');
     if (!/did not answer for one within 0\.3s, and was stopped/.test(o.stall.error || '')) throw new Error(`it said ${o.stall.error}`);
     eq(o.stall.files.length, 0, 'nothing kept for it');
+  });
+
+  check('voice: a clip the engine says is done is kept only if it reads as a whole WAV with audio in it', () => {
+    const o = ran();
+    if (!/^the voice engine said one was voiced, but \S+\/one\.\d+-[0-9a-f]{6}\.wav is cut short: its data chunk promises \d+ bytes and the file holds 56$/.test(o.cut.error || '')) {
+      throw new Error(`a clip cut short: ${o.cut.error}`);
+    }
+    eq(o.cut.files.length, 0, 'nothing kept for a clip cut short, at the kept name or the one handed out');
+    eq(o.empty.error, 'the voice engine said one was voiced, and wrote no audio for it', 'a clip with no audio');
+    eq(o.empty.files.length, 0, 'nothing kept for it either');
   });
 
   check('voice: an engine run by a script without exec is stopped whole at a timeout, and writes nothing late', () => {
@@ -6813,9 +6836,12 @@ check('the notes page says which version it is, and an earlier one can be asked 
   const whenBoth = (name, fn) => (ff && browser ? check(name, fn)
     : console.log(`  --    ${name}\n        not run: ${browser ? 'no ffmpeg' : 'no browser'} on this machine`));
 
-  /* `live` is the lavfi source of the live take's audio. One step,
-     2-the-keys, has its script taken out. */
-  function rig(live = 'sine=frequency=300:duration=14') {
+  /* `live` is the lavfi source of the live take's audio: by default two
+     seconds of quiet, three of tone, a second and a half of quiet and a
+     long stretch, so the sample is cut from the first stretch of ten
+     seconds, at 6.5 s, and not from the start or the first sound. One
+     step, 2-the-keys, has its script taken out. */
+  function rig(live = "sine=frequency=300:duration=22,volume='if(between(t,2,5)+gte(t,6.5),1,0)':eval=frame") {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sipario-voice-'));
     const t = path.join(dir, 'talk');
     scaffold(t);
@@ -6850,8 +6876,9 @@ check('the notes page says which version it is, and an earlier one can be asked 
     const before = fs.readFileSync(path.join(r.take, 'take.json'), 'utf8');
     const res = r.run(['voice', '--hold', '1.5']);
     eq(res.status, 0, `it voiced (${res.stderr.trim().split('\n').pop()})`);
-    const said = /^\[voice\] take (\S+): \d+:\d\d, 22 steps, 21 voiced by fake \(21 new, 0 cached\), 1 with no script held 1\.5s, in the voice of take 20261003-100000-aaaa \(10\.0s from 0s\)$/m.exec(res.stdout);
+    const said = /^\[voice\] take (\S+): \d+:\d\d, 22 steps, 21 voiced by fake \(21 new, 0 cached\), 1 with no script held 1\.5s, in the voice of take 20261003-100000-aaaa \(10\.0s from (\d+(?:\.\d+)?)s\)$/m.exec(res.stdout);
     if (!said) throw new Error(`it said ${res.stdout}`);
+    if (Math.abs(Number(said[2]) - 6.5) > 0.1) throw new Error(`the sample was cut from ${said[2]}s, not the first ten seconds of speech at 6.5s`);
     if (!/\[voice\] 2\/22 2-the-keys: no script, held 1\.5s/.test(res.stderr)) throw new Error(`the held step was not said: ${res.stderr}`);
     if (!/\[voice\] 1\/22 1-a-slide-of-every-template: \d+\.\d\ds, new in/.test(res.stderr)) throw new Error(`no progress: ${res.stderr}`);
 
@@ -6875,7 +6902,7 @@ check('the notes page says which version it is, and an earlier one can be asked 
     eq(`${k.voice.engine} ${k.voice.ready.ready} ${k.voice.hold}`, 'fake true 1.5', 'the engine, its ready line and the hold');
     eq(k.voice.held.join(' '), '2-the-keys', 'which step was held');
     eq(k.voice.synthetic.join(' '), sent.map((q) => q.id).join(' '), 'which were voiced');
-    eq(`${k.voice.sample.take} ${k.voice.sample.offset} ${k.voice.sample.file}`, `${r.takeId} 0 sample.wav`, 'where the sample came from');
+    eq(`${k.voice.sample.take} ${k.voice.sample.offset} ${k.voice.sample.file}`, `${r.takeId} ${said[2]} sample.wav`, 'where the sample came from');
     /* Ten seconds asked for; an AAC take decodes from a few milliseconds in,
        and the length kept is the one the WAV holds. */
     if (Math.abs(k.voice.sample.length - 10) > 0.05) throw new Error(`the sample runs ${k.voice.sample.length}s`);
@@ -6883,7 +6910,8 @@ check('the notes page says which version it is, and an earlier one can be asked 
 
     /* Each step's place is counted in frames: whole at 24 kHz, the held
        one exactly 1.5s, the 24 kHz clips exactly as the engine made them,
-       and the last ending where the file does. */
+       the 16 kHz ones as long once converted, to the frame, and the last
+       ending where the file does. */
     const w = readWav(path.join(dir, 'voice.wav'));
     eq(`${w.format} ${w.bits} ${w.channels} ${w.rate}`, 'pcm 16 1 24000', 'the take\'s audio');
     const at = k.marks.map((m) => m.t * 24000);
@@ -6891,9 +6919,11 @@ check('the notes page says which version it is, and an earlier one can be asked 
     const lens = at.map((f, i) => Math.round((i + 1 < at.length ? at[i + 1] : w.frames) - f));
     eq(lens[1], 36000, 'the held step, 1.5s to the frame');
     sent.forEach((q, n) => {
-      if (n % 2) return;
       const i = r.steps.findIndex((s) => s.id === q.id);
-      eq(lens[i], Math.round(24000 * 0.02 * q.text.length), `${q.id}, as long as its clip`);
+      if (!(n % 2)) return eq(lens[i], Math.round(24000 * 0.02 * q.text.length) + 7, `${q.id}, as long as its clip`);
+      const want = (Math.round(16000 * 0.02 * q.text.length) + 7) * 1.5;
+      if (Math.abs(lens[i] - want) > 1) throw new Error(`${q.id} runs ${lens[i]} frames; its 16 kHz clip is ${want} at 24 kHz`);
+      return null;
     });
     eq(lens.reduce((a, b) => a + b, 0), w.frames, 'the steps add up to the file');
     eq(k.length, w.frames / 24000, 'and the take says how long');
