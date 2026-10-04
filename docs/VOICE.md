@@ -134,7 +134,10 @@ the other:
     "ready": { "ready": true, "engine": "qwen3-tts", "model": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
                "version": "0.1.1", "device": "mps", "dtype": "bfloat16", "sr": 24000,
                "temperature": 0.9, "top_k": 50, "seed": "sha256('sipario:'+text)[:4]",
-               "loudness": "-20 LUFS, TP -2", "transcriber": "faster-whisper 1.2.1 medium.en",
+               "sample": "-20 LUFS, TP -2, ends before a word cut within 0.3s, 0.4s silence",
+               "transcriber": "faster-whisper 1.2.1 medium.en",
+               "length": "0.035s a char to 3s + 2.5x expected, 3 tries",
+               "clip": "-20 LUFS, alimiter at -2 dBFS",
                "watermark": "perth", "limit": 800, "pause": 0.25 },
     "sample": { "take": "20261003-221126-sm7d", "offset": 203.56, "length": 10, "file": "sample.wav" },
     "synthetic": ["0-title"],
@@ -198,13 +201,19 @@ stderr.
 ## Qwen3-TTS, set up as an engine
 
 The recommended engine. Paul listened to five candidates side by side on
-2026-10-04, each reading the same lines in his cloned voice, and Qwen3-TTS
-sounded most like him, his British accent kept. Measured on 2026-10-04 on
-an Apple M4 Max (128 GB) with qwen-tts 0.1.1, the
+2026-10-04, each reading the same lines in his cloned voice, and judged
+Qwen3-TTS the best sounding of the five; the clips he heard were cloned
+from a sample picked by hand, not from the one sipario cuts. Measured on
+2026-10-04 on an Apple M4 Max (128 GB) with qwen-tts 0.1.1, the
 `Qwen/Qwen3-TTS-12Hz-1.7B-Base` model and Python 3.12. It needs
 [uv](https://docs.astral.sh/uv/) (`brew install uv`), or plain `python3 -m
 venv` and `pip` in the same steps, and ffmpeg on `PATH`, which sipario
 needs anyway.
+
+The pinned torch 2.14.1 has wheels for Apple Silicon on macOS 14 or later,
+for Linux and for 64-bit Windows, and none for an Intel Mac or for macOS 13
+and earlier, where the install below stops with `torch==2.14.1 has no
+wheels with a matching platform tag`. Only the Mac is measured.
 
 ```bash
 uv venv --python 3.12 ~/.local/share/sipario-tts-qwen
@@ -215,12 +224,12 @@ VIRTUAL_ENV=~/.local/share/sipario-tts-qwen uv pip install qwen-tts==0.1.1 \
 
 **Why these pins.** They are the versions measured, and two of them are
 needed whatever else changes. `av==18.1.0`, because av 19 dropped an
-argument that faster-whisper 1.2.1 passes to it, and the transcriber
-stops at the first sample with `TypeError: open() got an unexpected
-keyword argument 'metadata_errors'`. `setuptools<81`, because Perth
-imports `pkg_resources`, as under Chatterbox below. The venv is about 1.2 GB. Its log says SoX and
-flash-attn are not installed; qwen-tts runs without either, and the
-measurements here had neither.
+argument that faster-whisper 1.2.1 passes to it, and the transcriber stops
+at the first sample with `TypeError: open() got an unexpected keyword
+argument 'metadata_errors'`. `setuptools<81`, because Perth imports
+`pkg_resources`, as under Chatterbox below. The venv is about 1.4 GB once
+the adapter has run. Its log says SoX and flash-attn are not installed;
+qwen-tts runs without either, and the measurements here had neither.
 
 Save the adapter below as `~/.local/share/sipario-tts-qwen/sipario-tts`,
 change its first line to that venv's Python if your home is not
@@ -250,7 +259,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 
 # Stdout is the protocol and nothing else. The libraries below print to it,
 # from Python and from C, so before any of them loads, file descriptor 1 is
@@ -266,7 +274,6 @@ import soundfile as sf
 import torch
 import perth
 from faster_whisper import WhisperModel
-from faster_whisper.audio import decode_audio
 from faster_whisper.vad import VadOptions, get_speech_timestamps
 from qwen_tts import Qwen3TTSModel
 
@@ -281,20 +288,27 @@ TRANSCRIBER = "medium.en"
 TEMPERATURE = 0.9
 TOP_K = 50
 LOUDNESS = "loudnorm=I=-20:TP=-2"
+# The sample ends where a word the cut runs into begins (one that ends
+# within EDGE seconds of the end), then TAIL seconds of silence.
+EDGE = 0.3
+TAIL = 0.4
+# Each clip is brought to CLIP_LUFS, its peaks held at CLIP_PEAK (-2 dBFS).
+CLIP_LUFS = -20
+CLIP_PEAK = 0.794
 # A script goes in pieces of at most LIMIT characters, broken at sentence
 # ends and paragraphs, a sentence too long for one piece broken between
-# words, joined by PAUSE seconds of silence. One generate() call stops at
-# 8192 codec frames (655 s at 12.5 a second), and a 1581-character
-# paragraph came out whole in one call (81 s, every word heard back), so
-# the limit is half that for margin, not a cap; a piece whose length is
-# far off its word count is made again (see speak()).
+# words, joined by PAUSE seconds of silence. A 1581-character paragraph
+# came out whole in one call (81 s, every word heard back), so the limit
+# is half that for margin; a piece whose length is far off what its text
+# needs is made again (see speak()).
 LIMIT = 800
 PAUSE = 0.25
 TRIES = 3
+FRAMES = 12.5         # codec frames a second of speech
 
 ffmpeg = shutil.which("ffmpeg")
 if not ffmpeg:
-    sys.exit("sipario-tts: ffmpeg is not on PATH, and the sample is loudness-normalised with it")
+    sys.exit("sipario-tts: ffmpeg is not on PATH, and the sample and every clip are levelled with it")
 
 device = os.environ.get("QWEN_TTS_DEVICE") or (
     "cuda" if torch.cuda.is_available()
@@ -306,20 +320,33 @@ model = Qwen3TTSModel.from_pretrained(MODEL, device_map=device, dtype=dtype,
 whisper = WhisperModel(TRANSCRIBER, device="cpu", compute_type="int8")
 marker = perth.PerthImplicitWatermarker()
 sr = int(model.model.speech_tokenizer.get_output_sample_rate())
-work = tempfile.mkdtemp(prefix="sipario-tts-qwen-")
 
 # sipario caches each clip under this whole line, so everything that
 # changes the voice is in it: the model and its release, the device and
 # precision, the sampling settings, how the seed is chosen, how the sample
-# is levelled and transcribed, and the two settings above. The sampling
-# settings not named here are the checkpoint's own (generation_config.json).
+# is levelled, cut and transcribed, which lengths a piece is kept at, how
+# each clip is levelled, and how a script is broken into pieces. The
+# sampling settings not named here are the checkpoint's own
+# (generation_config.json).
 say({"ready": True, "engine": "qwen3-tts", "model": MODEL,
      "version": version("qwen-tts"), "device": device,
      "dtype": str(dtype).replace("torch.", ""), "sr": sr,
      "temperature": TEMPERATURE, "top_k": TOP_K,
-     "seed": "sha256('sipario:'+text)[:4]", "loudness": "-20 LUFS, TP -2",
+     "seed": "sha256('sipario:'+text)[:4]",
+     "sample": f"-20 LUFS, TP -2, ends before a word cut within {EDGE}s, {TAIL}s silence",
      "transcriber": f"faster-whisper {version('faster-whisper')} {TRANSCRIBER}",
+     "length": f"0.035s a char to 3s + 2.5x expected, {TRIES} tries",
+     "clip": f"{CLIP_LUFS} LUFS, alimiter at -2 dBFS",
      "watermark": "perth", "limit": LIMIT, "pause": PAUSE})
+
+
+def pcm(args, rate, data=None):
+    """Audio through ffmpeg as mono float samples at rate. It goes by pipe,
+    so nothing of the voice is ever written to disk, and nothing is left
+    behind however the adapter is stopped."""
+    out = subprocess.run([ffmpeg, "-v", "error", *args, "-ar", str(rate), "-ac", "1",
+                          "-f", "f32le", "-"], input=data, stdout=subprocess.PIPE, check=True)
+    return np.frombuffer(out.stdout, dtype=np.float32)
 
 
 def pieces(text):
@@ -350,84 +377,115 @@ def prepare(sample):
     Qwen3-TTS clones best from the audio and the words said in it. A sample
     that is mostly quiet, or in which nothing is heard, is refused rather
     than cloned from a transcript of nothing."""
-    level = os.path.join(work, "sample.wav")
-    subprocess.run([ffmpeg, "-v", "error", "-y", "-i", sample, "-af", LOUDNESS,
-                    "-ar", "24000", "-ac", "1", "-c:a", "pcm_s16le", level], check=True)
+    audio = pcm(["-i", sample, "-af", LOUDNESS], 16000)
+    voice = pcm(["-i", sample, "-af", LOUDNESS], 24000)
     # Speech is found by faster-whisper's own voice detector (Silero), which
     # goes by the shape of a voice and not its level: a sample cut at the
     # room's level is quiet throughout, speech and pauses alike.
-    audio = decode_audio(level, sampling_rate=16000)
     spoken = sum(t["end"] - t["start"] for t in get_speech_timestamps(audio, VadOptions()))
     if spoken < 0.5 * len(audio):
         raise ValueError(f"the sample {sample} is mostly silence: speech was heard in "
                          f"{spoken / 16000:.1f}s of its {len(audio) / 16000:.1f}s")
-    segments, _ = whisper.transcribe(level, language="en", beam_size=5)
-    words = " ".join(s.text.strip() for s in segments).strip()
+    heard = lambda a: [w for s in whisper.transcribe(a, language="en", beam_size=5,
+                                                     word_timestamps=True)[0] for w in s.words]
+    said = heard(audio)
+    # sipario cuts the sample at ten seconds, mostly in the middle of a
+    # word. The transcriber hears that word whole, and Qwen3-TTS then says
+    # the rest of it before the script ("Explicit. At the same time..."),
+    # so the sample ends where that word begins, a pause after it, and what
+    # is left is transcribed again.
+    if said and said[-1].end > len(audio) / 16000 - EDGE:
+        cut = said[-1].start
+        audio, voice = (np.concatenate([a[:int(cut * r)], np.zeros(int(TAIL * r), np.float32)])
+                        for a, r in ((audio, 16000), (voice, 24000)))
+        said = heard(audio)
+    words = "".join(w.word for w in said).strip()
     if len(words.split()) < 3:
         raise ValueError(f"no words were heard in the sample {sample} ({words!r}), "
                          "and Qwen3-TTS clones from the words as well as the voice")
     print(f"[sipario-tts] the sample says: {words}", flush=True)
-    prompt = model.create_voice_clone_prompt(ref_audio=level, ref_text=words)
+    prompt = model.create_voice_clone_prompt(ref_audio=(voice, 24000), ref_text=words)
     return prompt, words
 
 
 def speak(piece, prompt, seed):
     """One piece, made again with the next seed if its length is far off
-    what its words need: under 0.12 s a word is words dropped, over a
-    second a word (plus two) is a model that did not stop."""
-    words = len(piece.split())
+    what its text needs. Prose came out at 0.050 to 0.061 s a character
+    over a deck's seven steps; a digit or a symbol said as a word ($, %, /,
+    a dot inside a name) takes far longer, so each counts 0.6 s more. Under
+    0.035 s a character is a third of the piece or more missing; over 2.5
+    times the expected length and 3 s is a model that ran on. Generation
+    stops 2 s past that bound, so a model that never stops is cut off in
+    seconds and made again, well inside sipario's time for the request."""
+    expect = 0.06 * len(piece) + 0.6 * len(re.findall(r"\d|[$%&@#/\\+=_|<>~^*]|\.(?=\w)", piece))
+    least, most = 0.035 * len(piece), 3 + 2.5 * expect
     for t in range(TRIES):
         torch.manual_seed(seed + t)
         np.random.seed((seed + t) % 2**32)
         wavs, rate = model.generate_voice_clone(
             text=piece, language="English", voice_clone_prompt=prompt,
-            temperature=TEMPERATURE, top_k=TOP_K)
+            temperature=TEMPERATURE, top_k=TOP_K, max_new_tokens=int(FRAMES * (most + 2)))
         wav = np.asarray(wavs[0], dtype=np.float32)
         secs = len(wav) / rate
-        if 0.12 * words <= secs <= words + 2:
+        if least <= secs <= most:
             return wav
-        print(f"[sipario-tts] {secs:.1f}s for {words} words, made again", flush=True)
-    raise ValueError(f"{TRIES} tries at {piece[:60]!r} each came out {secs:.1f}s for {words} words")
+        print(f"[sipario-tts] {secs:.1f}s for {len(piece)} characters, not "
+              f"{least:.1f}s to {most:.1f}s, made again", flush=True)
+    raise ValueError(f"{TRIES} tries at {piece[:60]!r} each came out outside {least:.1f}s "
+                     f"to {most:.1f}s, the last {secs:.1f}s")
+
+
+def level(wav):
+    """The clip brought to CLIP_LUFS by one gain, measured by ffmpeg's
+    loudnorm, with a limiter holding the few peaks that would go past
+    CLIP_PEAK. The model's own level wanders by about 3 LU from one step
+    to the next, and its peaks reach full scale."""
+    raw = ["-f", "f32le", "-ar", str(sr), "-ac", "1", "-i", "-"]
+    err = subprocess.run([ffmpeg, "-hide_banner", "-nostats", *raw, "-af", "loudnorm=print_format=json",
+                          "-f", "null", "-"], input=wav.tobytes(), stdout=subprocess.DEVNULL,
+                         stderr=subprocess.PIPE, check=True).stderr
+    found = float(re.search(rb'"input_i" : "([^"]+)"', err).group(1))
+    gain = CLIP_LUFS - found if np.isfinite(found) else 0
+    out = pcm([*raw, "-af", f"volume={gain:.2f}dB,alimiter=limit={CLIP_PEAK}:level=false:latency=true"],
+              sr, wav.tobytes())
+    return out[:len(wav)]
 
 
 voice = None          # (key, prompt, transcript) for the sample in use
-try:
-    for line in sys.stdin:
-        if not line.strip():
-            continue
-        rid = None
-        try:
-            req = json.loads(line)
-            rid = req.get("id")
-            # Levelling and transcribing take seconds; a run sends the same
-            # sample for every step, so it is done once.
-            key = (req["sample"], os.stat(req["sample"]).st_mtime_ns)
-            if voice is None or voice[0] != key:
-                voice = (key, *prepare(req["sample"]))
-            seed = int.from_bytes(hashlib.sha256(("sipario:" + req["text"]).encode()).digest()[:4], "big")
-            gap = np.zeros(int(sr * PAUSE), dtype=np.float32)
-            clips = []
-            for piece in pieces(req["text"]):
-                clips += [speak(piece, voice[1], seed), gap]
-            wav = np.concatenate(clips[:-1]) if clips else np.zeros(0, dtype=np.float32)
-            # Qwen3-TTS marks nothing it makes, so the adapter does, with
-            # Resemble AI's Perth, and reads the mark back off the 16-bit
-            # samples that are written before writing them.
-            wav = marker.apply_watermark(wav, sample_rate=sr)
-            pcm = (np.clip(wav, -1, 1) * 32767).round().astype(np.int16)
-            mark = float(np.mean(marker.get_watermark(pcm.astype(np.float32) / 32767, sample_rate=sr)))
-            if mark < 0.9:
-                raise ValueError(f"the watermark read back at {mark:.2f}, not 1")
-            sf.write(req["out"], pcm, sr, subtype="PCM_16", format="WAV")
-            say({"id": rid, "ok": True, "out": req["out"], "seconds": len(pcm) / sr,
-                 "watermark": round(mark, 3)})
-        except Exception as e:
-            say({"id": rid, "ok": False, "error": f"{type(e).__name__}: {e}"})
-        finally:
-            if device == "mps":
-                torch.mps.empty_cache()
-finally:
-    shutil.rmtree(work, ignore_errors=True)
+for line in sys.stdin:
+    if not line.strip():
+        continue
+    rid = None
+    try:
+        req = json.loads(line)
+        rid = req.get("id")
+        # Levelling and transcribing take seconds; a run sends the same
+        # sample for every step, so it is done once.
+        key = (req["sample"], os.stat(req["sample"]).st_mtime_ns)
+        if voice is None or voice[0] != key:
+            voice = (key, *prepare(req["sample"]))
+        seed = int.from_bytes(hashlib.sha256(("sipario:" + req["text"]).encode()).digest()[:4], "big")
+        gap = np.zeros(int(sr * PAUSE), dtype=np.float32)
+        clips = []
+        for piece in pieces(req["text"]):
+            clips += [speak(piece, voice[1], seed), gap]
+        wav = level(np.concatenate(clips[:-1])) if clips else np.zeros(0, dtype=np.float32)
+        # Qwen3-TTS marks nothing it makes, so the adapter does, with
+        # Resemble AI's Perth, and reads the mark back off the 16-bit
+        # samples that are written before writing them.
+        wav = marker.apply_watermark(wav, sample_rate=sr)
+        out = (np.clip(wav, -1, 1) * 32767).round().astype(np.int16)
+        mark = float(np.mean(marker.get_watermark(out.astype(np.float32) / 32767, sample_rate=sr)))
+        if mark < 0.9:
+            raise ValueError(f"the watermark read back at {mark:.2f}, not 1")
+        sf.write(req["out"], out, sr, subtype="PCM_16", format="WAV")
+        say({"id": rid, "ok": True, "out": req["out"], "seconds": len(out) / sr,
+             "watermark": round(mark, 3)})
+    except Exception as e:
+        say({"id": rid, "ok": False, "error": f"{type(e).__name__}: {e}"})
+    finally:
+        if device == "mps":
+            torch.mps.empty_cache()
 ```
 
 **Why it transcribes the sample.** Qwen3-TTS clones a voice either from
@@ -442,8 +500,26 @@ cloned from a transcript of nothing.
 
 **Why it levels the sample.** sipario cuts the sample at the room's own
 level, and a laptop's microphone across a room recorded Paul's speech at
-around -48 dB. Levelled to -20 LUFS first, the same ten seconds cloned
+about -44 LUFS. Levelled to -20 LUFS first, the same ten seconds cloned
 closer: 0.84 and 0.85 against 0.82 and 0.81, over two seeds.
+
+**Why it ends the sample before the cut.** sipario cuts ten seconds,
+mostly in the middle of a word. The transcriber hears that word whole,
+and Qwen3-TTS then said the rest of it before the script: two of a deck's
+seven steps opened with a stray "Explicit." So the adapter ends the
+sample where a word running to within 0.3 s of the end begins, adds 0.4 s
+of silence and transcribes what is left. The same deck then opened every
+step on its own first words (2026-10-04).
+
+**Why it levels every clip.** Qwen3-TTS speaks at a level of its own,
+which wandered by 2.9 LU from one step of a deck to the next, with a few
+samples at full scale. The adapter brings each step's clip to -20 LUFS by
+one gain, measured with ffmpeg's `loudnorm`, and ffmpeg's `alimiter` holds
+the peaks that would pass -2 dBFS, before the watermark goes on. The same
+deck then came out between -20.1 and -19.6 LUFS a step, its highest peak
+at -1.0 dBFS (2026-10-04). Neither the sample nor any clip is written to
+disk on the way: they go to and from ffmpeg by pipe, so a stopped adapter
+leaves nothing of the voice behind.
 
 **The same script makes the same clip.** Each request is seeded from its
 text, with the first four bytes of the SHA-256 of `sipario:` and the text,
@@ -455,29 +531,42 @@ stage) are the checkpoint's own `generation_config.json`.
 
 **Long scripts.** A script is spoken in pieces of up to 800 characters,
 broken at sentence ends, with a quarter of a second between them. That is
-margin, not the model's limit: one call stops at 8192 frames, about eleven
-minutes, and a 1581-character paragraph came out whole in a single call,
-81 s with every word heard back by the transcriber. A piece whose length
-is far off its word count (under 0.12 s a word, or over a second a word
-and two more) is made again with the next seed, up to three times, and
-then refused, so neither a dropped sentence nor a model that does not stop
-becomes a clip. Neither happened in the measurements here.
+margin, not the model's limit: a 1581-character paragraph came out whole
+in a single call, 81 s with every word heard back by the transcriber.
+
+**How long a piece may come out.** Prose came out at 0.050 to 0.061 s a
+character over a deck's seven steps, and a digit or a symbol said as a
+word ($, %, /, a dot inside a name) takes far longer, so each counts 0.6 s
+more. A piece under 0.035 s a character, or over 2.5 times its expected
+length and 3 s, is made again with the next seed, up to three times, and
+then refused. Generation stops 2 s past that upper bound, so a model that
+does not stop is cut off in seconds and made again: a line with Japanese
+in it came out in 11.5 s, its first try cut off at 9.8 s. A sentence with
+a sum of money in figures, and a 57-character URL, each came out on the
+first try. The check catches a piece that lost about a third of its length
+or more, and a model that runs on. It does not catch a sentence missing
+from a long piece, or a word added to one; that would need each clip read
+back by the transcriber, which the adapter does not do. On the M4 Max,
+three tries that all run to the cut-off on an 800-character piece take a
+little over five minutes, inside the eight minutes and forty seconds
+sipario gives that request; on the CPU they would not fit.
 
 **The first run** downloads the model and the transcriber from Hugging
-Face into its cache (`~/.cache/huggingface`, or `$HF_HOME`): about 5.7 GB
-on disk, 4.2 GB of it the model. It took 104 s from start to ready on a
+Face into its cache (`~/.cache/huggingface`, or `$HF_HOME`): about 6.1 GB
+on disk, 4.5 GB of it the model. It took 104 s from start to ready on a
 fast connection. sipario waits up to ten minutes for it to say it is
 ready; on a slow line, run the adapter once by hand first
 (`$SIPARIO_TTS < /dev/null`) and let the download finish.
 
 **Speed**, measured 2026-10-04 on the M4 Max with the models cached: about
-7 s from start to ready, then about 0.9 seconds of work for each second of
-speech. A deck's seven scripted steps, 121 s of speech, took 106 s to
-voice, and the whole `sipario voice` run 115 s. The first step carries the
-sample's levelling and transcription and the GPU's warm-up (24.9 s for
-24.2 s of speech); every later step ran at 0.82 to 0.86. On the CPU
-(`QWEN_TTS_DEVICE=cpu`, which also runs in float32) one 13.5 s step took
-24.8 s, its sample's preparation included. Smaller Macs are not measured.
+7 s from start to ready, then about 0.85 seconds of work for each second
+of speech. A deck's seven scripted steps, 118 s of speech, took 108 s to
+voice, and the whole `sipario voice` run 116 s. The first step carries the
+sample's levelling, cut and two transcriptions and the GPU's warm-up:
+26.7 s for 22.6 s of speech. Every later step ran at 0.84 to 0.85. On the
+CPU (`QWEN_TTS_DEVICE=cpu`, which also runs in float32) one 13.3 s step
+took 27.3 s, its sample's preparation included. Smaller Macs are not
+measured.
 
 ## Chatterbox, the alternative
 
