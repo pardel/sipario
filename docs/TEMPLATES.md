@@ -123,7 +123,7 @@ Every template, without writing any JavaScript:
 |---|---|
 | `meta` | The slide's front matter, plus what the headers carry: `{{meta.slide}}`, `{{meta.title}}`, `{{meta.group}}`, `{{meta.figure}}`. |
 | `body` | This step's body, the script removed, trimmed. |
-| `note` | This step's spoken script. Templates rarely want it. |
+| `note` | This step's spoken script as the notes show it, any directions to the voice taken out. Templates rarely want it. |
 | `step` | This step's index in the slide, from 0. |
 | `steps` | Every step of the slide. |
 | `lastStep` | The slide's final step. **Reserve height from it.** |

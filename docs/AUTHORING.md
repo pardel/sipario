@@ -513,26 +513,46 @@ On stage, in the notes window, on paper and in a PowerPoint export, the
 notes show the script with the tags taken out: "Imagine this scenario...",
 "6/10/2026", "API". A `<sub>` shows what it stands for, never the alias,
 and a `<say-as>` shows what you wrote, never the words it is read as. The
-voice hears the directions. A script with no tags reads and sounds exactly
-as it did before tags existed.
+voice hears the directions. A tag may sit on a line of its own: the notes
+close up around it, so the paragraph or the list it sits in stays one. A
+script with no tags reads and sounds exactly as it did before tags
+existed, unless it holds `&lt;`, `&gt;` or `&amp;`, or something sipario
+reads as a tag (below).
 
 | Tag | What the voice does | Values |
 |---|---|---|
 | `<speak>…</speak>` | nothing; it may wrap the whole script | none |
 | `<break time="1s"/>` | that long a silence, exactly | `1s`, `1.5s`, `500ms`, up to `10s` |
-| `<break strength="strong"/>` | a silence of a set length | `none` 0 s, `x-weak` 0.1 s, `weak` 0.25 s, `medium` 0.4 s (and a bare `<break/>`), `strong` 0.75 s, `x-strong` 1.2 s |
+| `<break strength="strong"/>` | a silence of a set length; `none`, like `time="0s"`, is no pause at all, the words either side read as one | `none` 0 s, `x-weak` 0.1 s, `weak` 0.25 s, `medium` 0.4 s (and a bare `<break/>`), `strong` 0.75 s, `x-strong` 1.2 s |
 | `<p>…</p>` | a paragraph: 0.6 s of silence before and after it, none at the very start or end of a step | none |
 | `<s>…</s>` | a sentence: a full stop after it if it has no ending of its own | none |
 | `<sub alias="A P I">API</sub>` | says the alias | any text |
 | `<say-as interpret-as="…">…</say-as>` | reads its text as words, below | `character`, `cardinal`, `ordinal`, `digits`, `telephone`, `date` (with `format`), `time`, `expletive` |
 | `<prosody rate="slow">…</prosody>` | slower or faster, pitch unchanged | `x-slow` 0.75×, `slow` 0.9×, `medium` 1×, `fast` 1.1×, `x-fast` 1.25×, or `50%` to `200%` |
-| `<prosody volume="soft">…</prosody>` | quieter or louder | `default` and `medium` 0 dB, `x-soft` -10 dB, `soft` -5 dB, `loud` +4 dB, `x-loud` +8 dB, `silent` (no sound, for as long as the words take), or `-40dB` to `+12dB` with its sign |
+| `<prosody volume="soft">…</prosody>` | quieter or louder, below | `default` and `medium` 0 dB, `x-soft` -10 dB, `soft` -5 dB, `loud` +4 dB, `x-loud` +8 dB, `silent` (no sound, for as long as the words take), or `-40dB` to `+12dB` with its sign |
 | `<prosody pitch="high">…</prosody>` | higher or lower, length unchanged | `default` and `medium` 0, `x-low` -4, `low` -2, `high` +2, `x-high` +4 semitones, or `-50%` to `+100%` with its sign |
 | `<lang xml:lang="it-IT">…</lang>` | asks the engine for that language | a language tag: `it-IT`, `fr`, `en-GB` |
 
-Attributes take `"` or `'`. A `<` before anything but a letter, `/`, `!`
-or `?` is text, so "x < 5" needs nothing; so is `&`, since there are no
-entities.
+Attributes take `"` or `'`. A `<` that opens no whole tag is text, so
+"x < 5", "a<b", `<https://example.com>` and `<paul@pardel.dev>` need
+nothing, unless the name of a tag sipario reads follows it, as in `<break
+time=1s/>`, which is a tag written wrongly and stops the render. Anything
+that is a whole tag is read as one, so `<Enter>` or `Vector<T>` stop the
+render as tags sipario does not read: write `&lt;Enter&gt;` and
+`Vector&lt;T&gt;`. `&lt;`, `&gt;` and `&amp;` are the only entities; any
+other `&` is text.
+
+A signed value is a change to the voice around it, as in SSML: a
+`volume="+3dB"` inside an `x-soft` is -7 dB, a `pitch="+10%"` inside a
+`low` a little less low. A named value, and any rate, is the voice's own
+and replaces the one around it. A change that takes the voice past the
+ranges in the table stops the render.
+
+Volume above 0 dB is held under -1 dBFS by a limiter, so it does not
+clip, and a clip that arrives with its peaks near full scale gains less
+than asked. Qwen3-TTS clips do: on two measured on 2026-10-04, `+4dB`
+gave +3.3 dB, `+8dB` (`x-loud`) +5.1 to +5.4 dB and `+12dB` +6.3 to +6.8
+dB, so the top of the range sounds much like `x-loud`. Quieter is exact.
 
 **How say-as reads**, in English, the British way:
 
@@ -542,10 +562,10 @@ entities.
 | `ordinal` | `3`, `21st` | third; twenty-first |
 | `digits` | `4071` | four zero seven one |
 | `character` | `MCP`, `W3C` | each letter and digit on its own, a comma between: M, C, P; W, three, C. Without the commas Qwen3-TTS read CAT and NASA as words |
-| `telephone` | `020 7946 0958`, `+44 20 7946 0958` | in the groups you wrote, 0 as "oh", a comma between groups, where the engine pauses briefly (about 0.17 s on Qwen3-TTS): oh two oh, seven nine four six, oh nine five eight. Written without spaces, in threes |
+| `telephone` | `020 7946 0958`, `+44 20 7946 0958` | in the groups you wrote, 0 as "oh", a comma between groups, where the engine pauses briefly (about 0.17 s on Qwen3-TTS): oh two oh, seven nine four six, oh nine five eight. Written without spaces, in threes, a single digit left at the end joining the last group: `1234567` is one two three, four five six seven |
 | `date` | `3/10/2026` with `format="dmy"` | the third of October, twenty twenty-six |
 | `time` | `1'30"`, `1:30`, `1:02:30` | a length of time: one minute thirty seconds; one hour two minutes thirty seconds |
-| `expletive` | a word | a 1 kHz bleep about as long as the word |
+| `expletive` | a word | a 1 kHz bleep about as long as the word, as loud and as stretched as the words around it, silent in a `silent` |
 
 A date is numbers, separated by `/`, `-`, `.` or a space, in the order
 `format` gives: `dmy`, `mdy`, `ymd`, `dm`, `md`, `ym`, `my`, `d`, `m`, `y`, or
@@ -559,7 +579,11 @@ and five", "nineteen oh five". `md` and `dm` read "the third of October",
 itself, so they work the same with any engine. The script is split into
 runs of text between its pauses and changes of voice; each run is one
 request to the engine, a `<sub>` or a `<say-as>` staying inside the
-sentence around it. A pause is written as silence, a bleep as a tone.
+sentence around it. A pause is written as silence, a bleep as a tone. The
+silence is exact, but the clips either side keep whatever quiet the
+engine left at their ends, so the pause heard is longer than the one
+written by that much, which varies from clip to clip (0 to 0.12 s of
+quiet below -45 dBFS on four Qwen3-TTS clips, 2026-10-04).
 Volume, rate and pitch are applied to a run's audio by ffmpeg once the
 engine has spoken it, so changing one never asks the engine again. Pitch
 is moved by playing the clip faster or slower and stretching it back to
@@ -584,7 +608,9 @@ looks obeyed:
   "three quarters", "five kilograms".
 - Any other tag, an attribute a tag does not take, a value not in the
   table, a date that is not one, a number too large.
-- A tag left open, closed out of order, or with nothing in it; a `<p>`
+- A `<sub>` whose alias has no letter or digit in it, which the voice
+  would say as nothing.
+- A tag left open, closed out of order, or with no text in it; a `<p>`
   inside a `<p>` or an `<s>`, an `<s>` inside an `<s>`, a `<speak>`
   inside anything, or any tag inside a `<sub>` or a `<say-as>`, which hold
   text only.

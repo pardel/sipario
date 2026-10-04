@@ -90,7 +90,7 @@ like, so change the engine instead unless the example is what is wrong.
 npm test
 ```
 
-345 checks, one line each, with a count at the end and exit status 1 if
+347 checks, one line each, with a count at the end and exit status 1 if
 any failed. Nothing stops at the first failure: every check runs, so one
 broken thing does not hide the next. Ten checks need a browser on the
 machine: three export the example both ways and read the files back, and
@@ -108,8 +108,8 @@ level. Four need a network address of the
 machine's own, to ask a served talk for its script, for the notes behind
 their link, and for the take routes, as another machine would. A check
 that cannot run prints a line saying why and is not counted either way, so
-a machine with no browser runs 335, one with a browser and no ffmpeg 335,
-and one with no browser and no network either 331.
+a machine with no browser runs 337, one with a browser and no ffmpeg 337,
+and one with no browser and no network either 333.
 
 The suite writes a room's sessions to a scratch `SIPARIO_DATA` of its
 own, so running it leaves nothing among your real ones.

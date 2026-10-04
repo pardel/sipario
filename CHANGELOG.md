@@ -48,9 +48,11 @@ so a break ships as a minor and this file is the whole of the warning.
   is voiced with the same requests and the same cached clips as before.
 - **Changed:** a tag in a script that sipario does not read stops the
   render, named with its slide and step: `<emphasis>`, `<phoneme>`,
-  `say-as` fraction, unit and address, and any other tag, HTML included,
-  which used to show in the notes as text. A `<` not followed by a letter,
-  `/`, `!` or `?` is still text.
+  `say-as` fraction, unit and address, and any other whole tag, HTML
+  included, which used to show in the notes as text. A `<` that opens no
+  whole tag is still text (`x < 5`, `<https://example.com>`, `a<b`), and
+  `&lt;`, `&gt;` and `&amp;` now stand for `<`, `>` and `&`, so a
+  `<Enter>` is written `&lt;Enter&gt;`.
 - **Changed:** a take's `notes` keep each step's script as the voice reads
   it, directions included, for a live take as for a voiced one.
 
