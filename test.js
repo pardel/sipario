@@ -6459,15 +6459,18 @@ check('the notes page says which version it is, and an earlier one can be asked 
      from clips that need converting and clips that do not. Seven frames
      over twenty milliseconds a character, so no clip is a whole number of
      ten milliseconds, as a real engine's seldom is: a step's place
-     rounded to the hundredth, as ffmpeg times a file, would show. Told by its
-     environment to misbehave, after FAKE_TTS_AFTER good answers: `hang`
-     before it is ready, `junk` on stdout, `die` part way through writing
-     a clip, `error` for an answer, `stall` without one, `late` with one
-     that comes after the request's time, `cut` and `empty` saying ok over
-     a clip cut short and one with no audio in it. FAKE_TTS_LINGER is how long it
-     stays once its stdin closes, in milliseconds or `forever`.
-     FAKE_TTS_LOG collects every request it is sent, and FAKE_TTS_PID its
-     own process id, which is the engine's even when a script runs it. */
+     rounded to the hundredth, as ffmpeg times a file, would show.
+
+     Told by its environment to misbehave, after FAKE_TTS_AFTER good
+     answers: `hang` before it is ready, `junk` on stdout, `die` part way
+     through writing a clip, `error` for an answer, `stall` without one,
+     `late` with one that comes after the request's time, `cut` and
+     `empty` saying ok over a clip cut short and one with no audio in it.
+     FAKE_TTS_LINGER is how long it stays once its stdin closes, in
+     milliseconds or `forever`. FAKE_TTS_VERSION is said in its ready
+     line, as a real engine says its release. FAKE_TTS_LOG collects every
+     request it is sent, and FAKE_TTS_PID its own process id, which is the
+     engine's even when a script runs it. */
   function fakeTts() {
     const fs = require('fs');
     const mode = process.env.FAKE_TTS || '';
@@ -6485,7 +6488,8 @@ check('the notes page says which version it is, and an earlier one can be asked 
     if (process.env.FAKE_TTS_PID) fs.appendFileSync(process.env.FAKE_TTS_PID, `${process.pid}\n`);
     process.stderr.write('fake: loading the model\n');
     if (mode === 'hang') return setInterval(() => {}, 1000);
-    process.stdout.write(JSON.stringify({ ready: true, engine: 'fake', sr: 24000 }) + '\n');
+    const version = process.env.FAKE_TTS_VERSION;
+    process.stdout.write(JSON.stringify({ ready: true, engine: 'fake', sr: 24000, ...(version ? { version } : {}) }) + '\n');
     let n = 0;
     let buf = '';
     const reply = (o) => process.stdout.write(JSON.stringify(o) + '\n');
@@ -6851,20 +6855,24 @@ check('the notes page says which version it is, and an earlier one can be asked 
     const steps = require('./lib/export.js').outline(src, tt);
     const key = require('./lib/render.js').identity(src).key;
     const data = path.join(dir, 'data');
+    const addLive = (id, source) => {
+      const at = path.join(video.takesDir(key, data), id);
+      fs.mkdirSync(at, { recursive: true });
+      const made = spawnSync(ff, ['-v', 'error', '-f', 'lavfi', '-i', source, '-c:a', 'aac', path.join(at, 'take.m4a')]);
+      if (made.status !== 0) throw new Error(`the live take's audio was not made: ${made.stderr}`);
+      fs.writeFileSync(path.join(at, 'take.json'), JSON.stringify({ version: 1, kind: 'live', audio: 'take.m4a',
+        marks: [{ id: steps[0].id, t: 0 }] }));
+      return at;
+    };
     const takeId = '20261003-100000-aaaa';
-    const take = path.join(video.takesDir(key, data), takeId);
-    fs.mkdirSync(take, { recursive: true });
-    const made = spawnSync(ff, ['-v', 'error', '-f', 'lavfi', '-i', live, '-c:a', 'aac', path.join(take, 'take.m4a')]);
-    if (made.status !== 0) throw new Error(`the live take's audio was not made: ${made.stderr}`);
-    fs.writeFileSync(path.join(take, 'take.json'), JSON.stringify({ version: 1, kind: 'live', audio: 'take.m4a',
-      marks: [{ id: steps[0].id, t: 0 }] }));
+    const take = addLive(takeId, live);
     const bin = fakeAt(dir);
     const log = path.join(dir, 'heard.log');
     const run = (args, more = {}) => spawnSync(process.execPath, [path.join(ROOT, 'bin/sipario.js'), ...args, t],
       { cwd: dir, encoding: 'utf8', timeout: 120000,
         env: { ...process.env, SIPARIO_DATA: data, SIPARIO_TTS: bin, FAKE_TTS_LOG: log, ...more } });
     const heard = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
-    return { dir, t, data, key, steps, takeId, take, run, heard, log,
+    return { dir, t, data, key, steps, takeId, take, addLive, run, heard, log,
              cache: path.join(data, 'voice', key.replace(/^sipario:/, '')),
              done: () => fs.rmSync(dir, { recursive: true, force: true }) };
   }
@@ -6953,7 +6961,7 @@ check('the notes page says which version it is, and an earlier one can be asked 
   });
   if (voiced) voiced.done();
 
-  whenFf('voice: an engine that dies keeps every clip it finished, leaves no take, and the next run picks up from them', () => {
+  whenFf('voice: an engine that dies keeps every clip it finished, leaves no take, and the next run picks up from them, unless the engine or the sample is another', () => {
     const r = rig();
     try {
       const died = r.run(['voice'], { FAKE_TTS: 'die', FAKE_TTS_AFTER: '3' });
@@ -6977,6 +6985,22 @@ check('the notes page says which version it is, and an earlier one can be asked 
       if (!/21 voiced by fake \(18 new, 3 cached\)/.test(again.stdout)) throw new Error(`it said ${again.stdout}`);
       for (const id of first) if (!new RegExp(`${id}: \\d+\\.\\d\\ds, cached`).test(again.stderr)) throw new Error(`${id} was not taken from the cache`);
       eq(r.heard().some((q) => first.includes(q.id)), false, 'the clips kept were not asked for again');
+
+      /* A clip is found again only by the engine that made it, saying the
+         same of itself, cloning the same sample: a new release voices every
+         step again, and so does a newer live take, while --from the take
+         the clips were cloned from finds every one of them. */
+      const upgraded = r.run(['voice'], { FAKE_TTS_VERSION: '2' });
+      if (!/21 voiced by fake \(21 new, 0 cached\)/.test(upgraded.stdout)) throw new Error(`a new release: ${upgraded.stdout}${upgraded.stderr}`);
+      r.addLive('20261003-110000-bbbb', 'sine=frequency=440:duration=14');
+      const newer = r.run(['voice']);
+      if (!/21 voiced by fake \(21 new, 0 cached\).* in the voice of take 20261003-110000-bbbb /.test(newer.stdout)) {
+        throw new Error(`a newer live take: ${newer.stdout}${newer.stderr}`);
+      }
+      const from = r.run(['voice', '--from', r.takeId]);
+      if (!/21 voiced by fake \(0 new, 21 cached\).* in the voice of take 20261003-100000-aaaa /.test(from.stdout)) {
+        throw new Error(`--from the first take: ${from.stdout}${from.stderr}`);
+      }
     } finally {
       r.done();
     }

@@ -29,10 +29,15 @@ never leaves the machine.
   read and never written; the voiced take sits beside it, with its own
   `voice.wav`, the sample it was cloned from and its `take.json`.
 - **It keeps every clip.** Each step's clip is kept in sipario's data
-  folder (`voice/<deck>/`), named by a hash of the engine's name, the
-  sample and the script. A run stopped part way, by a crash or by Ctrl-C,
-  keeps every clip it finished, and the next run starts where it stopped;
-  an edit to one step's script means one new clip.
+  folder (`voice/<deck>/`), named by a hash of what the engine says of
+  itself, the sample and the script. A run stopped part way, by a crash or
+  by Ctrl-C, keeps every clip it finished, and the next run starts where
+  it stopped; an edit to one step's script means one new clip. Both hold
+  while the sample does: a newer live take is a new sample, so the next
+  run voices every step again, in the voice cut from that take. `--from
+  <take>` keeps the voice, and the clips, of the take named. So does an
+  engine that says nothing new of itself: a new release of it voices every
+  step again.
 - **It does not re-voice part of a live take.** A take is either your
   recording or the engine's reading of the whole script.
 - **It does not choose for you which take is the video.** `export video`
@@ -95,7 +100,7 @@ sipario voice [path/to/talk] [--from <live take>] [--hold <seconds>]
    their words to the sample, however long the deck.
 
 The engine is started even when every clip is already in the cache,
-because a clip is cached under the name the engine gives itself, and only
+because a clip is cached under what the engine says of itself, and only
 the engine can say it.
 
 ### What a voiced take keeps
@@ -116,7 +121,8 @@ the other:
   "notes": { "deck:4f1c2a9be03d": { "0-title": "Good afternoon…" } },
   "voice": {
     "engine": "chatterbox",
-    "ready": { "ready": true, "engine": "chatterbox", "device": "mps", "sr": 24000 },
+    "ready": { "ready": true, "engine": "chatterbox", "version": "0.1.7", "device": "mps", "sr": 24000,
+               "watermark": "perth", "limit": 300, "pause": 0.25 },
     "sample": { "take": "20261003-221126-sm7d", "offset": 203.56, "length": 10, "file": "sample.wav" },
     "synthetic": ["0-title"],
     "held": [],
@@ -140,11 +146,13 @@ voice`, with stdin and stdout as pipes and stderr as its log. Any program
 that does the following is an engine:
 
 1. **Ready.** Once it can serve, it writes one line to stdout:
-   `{"ready": true, "engine": "<name>", ...}`. `engine` names it; clips
-   are cached under that name, so change it when the voice it makes would
-   change. Anything else in the line is kept in the take as said. sipario
-   waits ten minutes for this line, for a first run that downloads a
-   model.
+   `{"ready": true, "engine": "<name>", ...}`. `engine` names it, and the
+   line is kept in the take as said. Clips are cached under the whole
+   line, so put in it whatever would change the voice it makes (its
+   release, the device, a setting) and nothing that changes from one run
+   to the next, such as a time or a process id, or no clip is ever found
+   again. sipario waits ten minutes for this line, for a first run that
+   downloads a model.
 2. **Requests.** sipario writes one JSON object a line to stdin,
    `{"id": "<step id>", "text": "<the script>", "sample": "<path>",
    "out": "<path>"}`, and waits for the reply before it sends the next.
@@ -243,15 +251,20 @@ try:
 except Exception:
     release = None
 
-say({"ready": True, "engine": "chatterbox", "version": release,
-     "device": device, "sr": model.sr, "watermark": "perth"})
-
 # One generate() call stops at 1000 speech tokens, about 40 s of speech,
 # and drops the rest without a word. So a script goes in pieces of at most
 # LIMIT characters, broken at sentence ends and paragraphs, a sentence too
-# long for one piece broken between words, joined by a short pause.
+# long for one piece broken between words, joined by PAUSE seconds of
+# silence.
 LIMIT = 300
 PAUSE = 0.25
+
+# sipario caches each clip under this whole line, so everything that
+# changes the voice is in it: the release, the device and the two settings
+# above. Edit one and every step is voiced again.
+say({"ready": True, "engine": "chatterbox", "version": release,
+     "device": device, "sr": model.sr, "watermark": "perth",
+     "limit": LIMIT, "pause": PAUSE})
 
 
 def pieces(text):

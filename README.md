@@ -402,7 +402,9 @@ Chatterbox, a local model under the MIT licence, as one, and gives the
 protocol any other engine can speak. Only your own live takes are cloned,
 never a voiced one, and every Chatterbox clip carries its maker's
 inaudible watermark, which sipario keeps. Each step's clip is kept, so a
-run stopped part way picks up where it stopped.
+run stopped part way picks up where it stopped, as long as it clones the
+same take: a newer live take voices every step again, and `--from` names
+the old one to keep its clips.
 
 ## Using it as a library
 

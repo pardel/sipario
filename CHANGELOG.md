@@ -26,10 +26,12 @@ so a break ships as a minor and this file is the whole of the warning.
   cut from your latest live take (`--from` names another) clone the voice,
   a local engine named by `SIPARIO_TTS` speaks every step's notes, and a
   step with none is held silent for `--hold` seconds, two by default. Every
-  clip is kept, so a run stopped part way picks up where it stopped. A
-  voiced take is never cloned from. docs/VOICE.md gives the engine protocol
-  and sets up Chatterbox, whose watermark is kept. `sipario takes` and
-  `export video` say which live take a voiced one came from.
+  clip is kept, under the engine's whole ready line, the sample and the
+  script, so a run stopped part way picks up where it stopped while the
+  engine and the take it clones stay the same. A voiced take is never
+  cloned from. docs/VOICE.md gives the engine protocol and sets up
+  Chatterbox, whose watermark is kept. `sipario takes` and `export
+  video` say which live take a voiced one came from.
 
 ## 0.6.0 — 2026-10-01
 
