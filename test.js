@@ -744,13 +744,19 @@ check('a path with underscores is left alone', () => {
 });
 
 check('a note cannot introduce a tag of its own', () => {
-  /* Escaping runs before the markers are applied, so the emphasis pass
-     can only ever see text it already made safe. */
-  const out = scriptOf('Careful: <script>alert(1)</script> and **<b>bold</b>**.');
-  eq(/<script>/.test(out), false, 'the script tag did not survive');
-  eq(/&lt;script&gt;/.test(out), true, 'it was escaped instead');
-  eq(/<strong>&lt;b&gt;bold&lt;\/b&gt;<\/strong>/.test(out), true,
+  /* A tag in a script is a direction to the voice or it is refused by
+     name (lib/ssml.js), so an HTML tag never reaches the page; what is
+     left is text, and escaping runs before the markers are applied, so
+     the emphasis pass can only ever see text it already made safe. */
+  let err = null;
+  try { scriptOf('Careful: <script>alert(1)</script>.'); } catch (e) { err = e; }
+  if (!err || !/1-a: <script> is not a tag sipario reads/.test(err.message)) {
+    throw new Error(`an HTML tag in a script was not refused by name: ${err ? err.message : 'rendered'}`);
+  }
+  const out = scriptOf('Careful: **1 < 2 & 3 > 2** and <sub alias="x">y</sub>.');
+  eq(/<strong>1 &lt; 2 &amp; 3 &gt; 2<\/strong>/.test(out), true,
      'emphasis still applied around the escaped text');
+  eq(/<sub|alias|>x</.test(out), false, 'a direction to the voice is not on the page');
 });
 
 check('bold wins over italic where the markers overlap', () => {
@@ -6289,6 +6295,282 @@ check('the notes page says which version it is, and an earlier one can be asked 
   eq(out.heldV, out.v1, 'the earlier version is served back by number');
   eq(out.heldEdited, false, 'as it was rendered');
 });
+
+// --------------------------------------------- directing the voice
+
+{
+  const ssml = require('./lib/ssml.js');
+  const { scriptText } = require('./lib/render.js');
+  const { deckPage, presenterPage } = require('./lib/pages.js');
+  const J = JSON.stringify;
+
+  check('voice directions: every tag read is read as documented, the notes showing the text and the voice the words', () => {
+    /* [script, what the notes show, what the voice says] */
+    const table = [
+      ['No tags at all.', 'No tags at all.', [{ text: 'No tags at all.' }]],
+      ['x < 5 & y > 2', 'x < 5 & y > 2', [{ text: 'x < 5 & y > 2' }]],
+      ['<speak>Hello.</speak>', 'Hello.', [{ text: 'Hello.' }]],
+      ['Hello <break time="1s"/> world', 'Hello world', [{ text: 'Hello' }, { pause: 1 }, { text: 'world' }]],
+      ["Hello <break time='500ms' /> world", 'Hello world', [{ text: 'Hello' }, { pause: 0.5 }, { text: 'world' }]],
+      ['wait<break/>now', 'wait now', [{ text: 'wait' }, { pause: 0.4 }, { text: 'now' }]],
+      ...Object.entries({ none: 0, 'x-weak': 0.1, weak: 0.25, medium: 0.4, strong: 0.75, 'x-strong': 1.2 }).map(([k, v]) =>
+        [`a <break strength="${k}"/> b`, 'a b', v ? [{ text: 'a' }, { pause: v }, { text: 'b' }] : [{ text: 'a' }, { text: 'b' }]]),
+      ['a <break time="1s"/><break time="0.5s"/> b', 'a b', [{ text: 'a' }, { pause: 1.5 }, { text: 'b' }]],
+      ['<break time="2s"/>After a breath.', 'After a breath.', [{ pause: 2 }, { text: 'After a breath.' }]],
+      ['<p>One.</p><p>Two.</p>', 'One. Two.', [{ text: 'One.' }, { pause: 0.6 }, { text: 'Two.' }]],
+      ['<p>One.</p><break time="1s"/><p>Two.</p>', 'One. Two.', [{ text: 'One.' }, { pause: 1 }, { text: 'Two.' }]],
+      ['<p>One.</p><break strength="weak"/><p>Two.</p>', 'One. Two.', [{ text: 'One.' }, { pause: 0.6 }, { text: 'Two.' }]],
+      ['<s>Hello</s><s>World!</s>', 'Hello World!', [{ text: 'Hello. World!' }]],
+      ['We follow the <sub alias="World Wide Web Consortium">W3C</sub> rules.', 'We follow the W3C rules.',
+        [{ text: 'We follow the World Wide Web Consortium rules.' }]],
+      ['Ask <say-as interpret-as="character">MCP</say-as> twice.', 'Ask MCP twice.', [{ text: `Ask M${ssml.SPELL}C${ssml.SPELL}P twice.` }]],
+      ['<prosody rate="slow">Slowly,</prosody> then not.', 'Slowly, then not.', [{ text: 'Slowly,', rate: 0.9 }, { text: 'then not.' }]],
+      ['<prosody rate="80%" volume="-6dB" pitch="+10%">Soft.</prosody>', 'Soft.',
+        [{ text: 'Soft.', volume: -6, rate: 0.8, pitch: 12 * Math.log2(1.1) }]],
+      ['<prosody volume="silent">Mouthed.</prosody>', 'Mouthed.', [{ text: 'Mouthed.', volume: -Infinity }]],
+      ['<prosody rate="medium" volume="default" pitch="medium">Same.</prosody> Same.', 'Same. Same.', [{ text: 'Same. Same.' }]],
+      ['<prosody rate="fast">a <prosody pitch="high">b</prosody></prosody>', 'a b', [{ text: 'a', rate: 1.1 }, { text: 'b', rate: 1.1, pitch: 2 }]],
+      ['Then <lang xml:lang="it-IT">buongiorno</lang>.', 'Then buongiorno.', [{ text: 'Then' }, { text: 'buongiorno.', language: 'it-IT' }]],
+      ['A <say-as interpret-as="expletive">damn</say-as> shame.', 'A damn shame.', [{ text: 'A' }, { tone: 0.3 }, { text: 'shame.' }]],
+      ['<speak>\n<p>Line one\nline two.</p>\n</speak>', '\nLine one\nline two.\n', [{ text: 'Line one\nline two.' }]],
+    ];
+    for (const [src, shown, said] of table) {
+      eq(ssml.plain(src), shown, `the notes show ${J(src)} as`);
+      eq(J(ssml.speech(src)), J(said), `the voice says ${J(src)} as`);
+    }
+    const plainNote = 'A script without a tag.\n\n- an item';
+    if (ssml.plain(plainNote) !== plainNote) throw new Error('a script with no tag is not returned as it came');
+  });
+
+  check('voice directions: everything sipario does not read is refused by name, with what to write instead', () => {
+    const refused = [
+      ['<emphasis>very</emphasis>', /^<emphasis> is not read: no voice engine sipario drives can stress a word\. Rewrite the line so the word carries itself, or set it apart with <break\/> or <prosody rate="slow">$/],
+      ['<emphasis level="strong">very</emphasis>', /^<emphasis> is not read/],
+      ['<phoneme alphabet="ipa" ph="x">tomato</phoneme>', /^<phoneme> is not read: spell the word as it sounds instead, <sub alias="tom-AH-toe">tomato<\/sub>$/],
+      ['<say-as interpret-as="fraction">3/4</say-as>', /^<say-as interpret-as="fraction"> is not read: write the fraction as it is said, "three quarters"$/],
+      ['<say-as interpret-as="unit">5kg</say-as>', /^<say-as interpret-as="unit"> is not read: write the unit as it is said, "five kilograms"$/],
+      ['<say-as interpret-as="address">1 Main St</say-as>', /^<say-as interpret-as="address"> is not read: write the address as it is said$/],
+      ['<foo>x</foo>', /^<foo> is not a tag sipario reads: it reads speak, break, p, s, sub, say-as, prosody and lang$/],
+      ['<b>bold</b>', /^<b> is not a tag sipario reads/],
+      ['<break pause="1s"/>', /^<break> has no attribute pause: it takes time or strength$/],
+      ['<p class="x">a</p>', /^<p> has no attribute class: it takes none$/],
+      ['<break time="1s" time="2s"/>', /^<break> has time twice$/],
+      ['<break time="1 second"/>', /^<break time="1 second">: a time is seconds or milliseconds, "1s", "1\.5s" or "500ms"$/],
+      ['<break time="11s"/>', /^<break time="11s"> is longer than 10s, the longest break read$/],
+      ['<break strength="huge"/>', /^<break strength="huge">: a strength is none, x-weak, weak, medium, strong or x-strong$/],
+      ['<prosody>a</prosody>', /^<prosody> changes nothing: give it a rate, a volume or a pitch$/],
+      ['<prosody rate="slowly">a</prosody>', /^<prosody rate="slowly">: a rate is x-slow, slow, medium, fast or x-fast, or a percentage of the voice's own from 50% to 200%$/],
+      ['<prosody rate="300%">a</prosody>', /^<prosody rate="300%">: a rate is/],
+      ['<prosody volume="6dB">a</prosody>', /^<prosody volume="6dB">: a volume is default, silent, x-soft, soft, medium, loud or x-loud, or a change in decibels from -40dB to \+12dB, written with its sign, "\+3dB" or "-6dB"$/],
+      ['<prosody volume="+20dB">a</prosody>', /^<prosody volume="\+20dB">: a volume is/],
+      ['<prosody pitch="10%">a</prosody>', /^<prosody pitch="10%">: a pitch is default, x-low, low, medium, high or x-high, or a change from -50% to \+100%, written with its sign, "\+10%" or "-5%"$/],
+      ['<lang xml:lang="Italian">ciao</lang>', /^<lang xml:lang="Italian">: a language is a language tag, "it-IT", "fr" or "en-GB"$/],
+      ['<lang>ciao</lang>', /^<lang> needs xml:lang="\.\.\.": the language, "it-IT"$/],
+      ['<sub>W3C</sub>', /^<sub> needs alias="\.\.\.": what to say in place of its text$/],
+      ['<say-as>3</say-as>', /^<say-as> needs interpret-as="\.\.\.": how to read its text: character, cardinal/],
+      ['<say-as interpret-as="spell-out">ab</say-as>', /^<say-as interpret-as="spell-out">: sipario reads character, cardinal, ordinal, digits, telephone, date, time or expletive$/],
+      ['<say-as interpret-as="date">3/10/2026</say-as>', /^<say-as interpret-as="date"> needs a format, which says the order of its parts: mdy, dmy/],
+      ['<say-as interpret-as="date" format="dd">3</say-as>', /^<say-as interpret-as="date" format="dd">: a format is mdy, dmy/],
+      ['<say-as interpret-as="cardinal" format="dmy">3</say-as>', /^<say-as interpret-as="cardinal" format="dmy">: format is for a date, and only a date$/],
+      ['<break time=1s/>', /^"<break time=1s\/>" is not a whole tag: a tag is <name attribute="value">, and one that holds nothing ends \/>$/],
+      ['<break time="1s"', /^"<break time=\\"1s\\"" is not a whole tag/],
+      ['<!-- a comment -->', /^"<!-- a comment -->": comments and declarations are not read in a script; take it out$/],
+      ['<?xml version="1.0"?><speak>a</speak>', /comments and declarations are not read/],
+      ['<prosody rate="slow">open', /^<prosody> is opened and never closed$/],
+      ['closed</p>', /^<\/p> closes nothing: no <p> is open$/],
+      ['<p><s>a</p></s>', /^<\/p> comes while <s> is still open: close <s> first$/],
+      ['a <break time="1s">', /^<break> holds nothing: write <break \.\.\.\/>$/],
+      ['a </break>', /^<\/break>: <break> holds nothing and has no closing tag; write <break \.\.\.\/>$/],
+      ['<p/>', /^<p\/> holds nothing: <p> wraps text, <p>\.\.\.<\/p>$/],
+      ['<p><p>a</p></p>', /^<p> inside <p>: paragraphs do not nest$/],
+      ['<s><p>a</p></s>', /^<p> inside <s>: a sentence cannot hold a paragraph; close the <s> first$/],
+      ['<s><s>a</s></s>', /^<s> inside <s>: sentences do not nest$/],
+      ['<prosody rate="slow"><speak>a</speak></prosody>', /^<speak> wraps the whole script or nothing, and cannot sit inside <prosody>$/],
+      ['<sub alias="x"><break/>y</sub>', /^<sub> holds text only, and <break> is inside it$/],
+      ['<say-as interpret-as="digits"><prosody rate="slow">1</prosody></say-as>', /^<say-as> holds text only, and <prosody> is inside it$/],
+      ['<sub alias="x"> </sub>', /^<sub> holds no text$/],
+      ['<say-as interpret-as="cardinal">lots</say-as>', /^<say-as interpret-as="cardinal"> reads a number, "42", "-3", "1,500" or "3\.14", and "lots" is not one$/],
+      ['<say-as interpret-as="cardinal">1000000000000000</say-as>', /^1000000000000000 is too large to read: up to 999 trillion is read$/],
+      ['<say-as interpret-as="ordinal">-3</say-as>', /^<say-as interpret-as="ordinal"> reads a whole number, "3" or "3rd", and "-3" is not one$/],
+      ['<say-as interpret-as="digits">12a</say-as>', /^<say-as interpret-as="digits"> reads digits, and "12a" has more than digits$/],
+      ['<say-as interpret-as="character">a+b</say-as>', /^<say-as interpret-as="character"> spells letters and digits, and "a\+b" has "\+"$/],
+      ['<say-as interpret-as="telephone">call me</say-as>', /^<say-as interpret-as="telephone"> reads digits, spaces, \( \) - \. and a leading \+, and "call me" has more$/],
+      ['<say-as interpret-as="date" format="dmy">3 Oct 2026</say-as>', /^<say-as interpret-as="date" format="dmy"> reads 3 numbers in the order dmy, "3\/10\/2026", and "3 Oct 2026" is not that$/],
+      ['<say-as interpret-as="date" format="dmy">31/9/2026</say-as>', /^<say-as interpret-as="date" format="dmy">: "31\/9\/2026" has no day 31$/],
+      ['<say-as interpret-as="date" format="dmy">29/2/2025</say-as>', /has no day 29$/],
+      ['<say-as interpret-as="date" format="mdy">13/1/2026</say-as>', /^<say-as interpret-as="date" format="mdy">: 13 is not a month$/],
+      ['<say-as interpret-as="date" format="yyyymmdd">2026-10-03</say-as>', /^<say-as interpret-as="date" format="yyyymmdd"> reads eight digits, "20261003", and "2026-10-03" is not$/],
+      ['<say-as interpret-as="time">half past</say-as>', /^<say-as interpret-as="time"> reads a length of time, 1'30", 1:30 or 1:02:30, and "half past" is not one$/],
+      ['<say-as interpret-as="time">1:75</say-as>', /^<say-as interpret-as="time">: "1:75" has more than 59 in a place that counts to 59$/],
+      ['<say-as interpret-as="time">1:75:00</say-as>', /has more than 59 in a place that counts to 59$/],
+    ];
+    for (const [src, re] of refused) {
+      const why = ssml.problem(src);
+      if (!why || !re.test(why)) throw new Error(`${J(src)}: ${why ? `said ${J(why)}` : 'was not refused'}`);
+      let err = null;
+      try { ssml.speech(src); } catch (e) { err = e; }
+      if (!(err instanceof ssml.SsmlError)) throw new Error(`${J(src)}: the voice read it`);
+    }
+    eq(ssml.problem('No tags.'), null, 'a script with no tag has no problem');
+  });
+
+  check('voice directions: a direction the voice cannot follow stops the render, every one named by its slide and step', () => {
+    let err = null;
+    try {
+      R(`# One
+
+## 1.1
+id: 1-a
+template: statement
+
+
+A line.
+
+\`\`\`notes
+Fine <break time="1s"/> here.
+\`\`\`
+--
+
+Another.
+
+\`\`\`notes
+Say it <emphasis>loudly</emphasis>.
+\`\`\`
+
+## 1.2
+id: 1-b
+template: statement
+
+
+A third.
+
+\`\`\`notes
+Like <phoneme ph="x">this</phoneme>.
+\`\`\`
+`);
+    } catch (e) { err = e; }
+    if (!err) throw new Error('it rendered');
+    const lines = err.message.split('\n');
+    eq(lines[0], 'deck.md has directions the voice cannot follow:', 'the heading');
+    if (!/^ {2}1-a step 2: <emphasis> is not read: no voice engine sipario drives can stress a word/.test(lines[1])) throw new Error(`the first: ${lines[1]}`);
+    if (!/^ {2}1-b: <phoneme> is not read: spell the word as it sounds instead/.test(lines[2])) throw new Error(`the second: ${lines[2]}`);
+    eq(lines.length, 3, 'and the step that is fine is not named');
+  });
+
+  check('voice directions: say-as reads numbers, digits, characters, telephones, dates and times into English words', () => {
+    const said = (content, as, format) => ssml.sayAs(content, as, format).words;
+    const table = [
+      ['0', 'cardinal', 'zero'], ['7', 'cardinal', 'seven'], ['13', 'cardinal', 'thirteen'], ['21', 'cardinal', 'twenty-one'],
+      ['100', 'cardinal', 'one hundred'], ['105', 'cardinal', 'one hundred and five'], ['1005', 'cardinal', 'one thousand and five'],
+      ['2026', 'cardinal', 'two thousand and twenty-six'], ['1,500', 'cardinal', 'one thousand five hundred'],
+      ['123456', 'cardinal', 'one hundred and twenty-three thousand four hundred and fifty-six'],
+      ['1000005', 'cardinal', 'one million and five'], ['3000000000', 'cardinal', 'three billion'],
+      ['-3', 'cardinal', 'minus three'], ['-3.14', 'cardinal', 'minus three point one four'], ['0.05', 'cardinal', 'zero point zero five'],
+      ['007', 'cardinal', 'seven'], ['+4', 'cardinal', 'four'],
+      ['1', 'ordinal', 'first'], ['2nd', 'ordinal', 'second'], ['3', 'ordinal', 'third'], ['5', 'ordinal', 'fifth'],
+      ['8', 'ordinal', 'eighth'], ['9', 'ordinal', 'ninth'], ['12', 'ordinal', 'twelfth'], ['20', 'ordinal', 'twentieth'],
+      ['21st', 'ordinal', 'twenty-first'], ['100', 'ordinal', 'one hundredth'], ['1003', 'ordinal', 'one thousand and third'],
+      ['4071', 'digits', 'four zero seven one'], ['12 34', 'digits', 'one two three four'],
+      ['MCP', 'character', ['M', 'C', 'P'].join(ssml.SPELL)], ['w3c', 'character', ['W', 'three', 'C'].join(ssml.SPELL)],
+      ['R2-D2', 'character', ['R', 'two', 'D', 'two'].join(ssml.SPELL)],
+      ['020 7946 0958', 'telephone', 'oh two oh, seven nine four six, oh nine five eight'],
+      ['+44 (0)20 7946-0958', 'telephone', 'plus four four, oh, two oh, seven nine four six, oh nine five eight'],
+      ['1234567', 'telephone', 'one two three, four five six seven'],
+      ['1234567890', 'telephone', 'one two three, four five six, seven eight nine oh'],
+      ['3/10/2026', 'date', 'the third of October, twenty twenty-six', 'dmy'],
+      ['10/3/2026', 'date', 'the third of October, twenty twenty-six', 'mdy'],
+      ['2026-10-03', 'date', 'the third of October, twenty twenty-six', 'ymd'],
+      ['20261003', 'date', 'the third of October, twenty twenty-six', 'yyyymmdd'],
+      ['10/3', 'date', 'the third of October', 'md'], ['22.12', 'date', 'the twenty-second of December', 'dm'],
+      ['2026/10', 'date', 'October twenty twenty-six', 'ym'], ['10 2026', 'date', 'October twenty twenty-six', 'my'],
+      ['31', 'date', 'the thirty-first', 'd'], ['5', 'date', 'May', 'm'], ['29/2', 'date', 'the twenty-ninth of February', 'dm'],
+      ['29/2/2024', 'date', 'the twenty-ninth of February, twenty twenty-four', 'dmy'],
+      ['2000', 'date', 'two thousand', 'y'], ['2005', 'date', 'two thousand and five', 'y'], ['1999', 'date', 'nineteen ninety-nine', 'y'],
+      ['1900', 'date', 'nineteen hundred', 'y'], ['1905', 'date', 'nineteen oh five', 'y'], ['1066', 'date', 'ten sixty-six', 'y'],
+      ['2010', 'date', 'twenty ten', 'y'], ['999', 'date', 'nine hundred and ninety-nine', 'y'],
+      ["1'30\"", 'time', 'one minute thirty seconds'], ['1:30', 'time', 'one minute thirty seconds'],
+      ['1:02:03', 'time', 'one hour two minutes three seconds'], ['2:00', 'time', 'two minutes'], ['0:01', 'time', 'one second'],
+      ["5'", 'time', 'five minutes'], ['45"', 'time', 'forty-five seconds'], ['1’30”', 'time', 'one minute thirty seconds'],
+      ['0:00', 'time', 'zero seconds'], ['90:00', 'time', 'ninety minutes'],
+    ];
+    for (const [content, as, words, format] of table) eq(said(content, as, format), words, `${as}${format ? ` ${format}` : ''} ${J(content)}`);
+    eq(J(ssml.sayAs('damn', 'expletive')), J({ tone: 0.3 }), 'a short expletive bleeps for 0.3s');
+    eq(J(ssml.sayAs('confounded', 'expletive')), J({ tone: 0.75 }), 'a longer one about as long as the word');
+  });
+
+  /* One deck, every surface: the notes window and the deck page carry
+     the deck's own markup, the print page the same, the PowerPoint export
+     and notesText the text. None of them may show a tag, an alias, or the
+     words a say-as is read as. */
+  const directed = `# One
+
+## 1.1
+id: 1-a
+template: statement
+
+
+A line.
+
+\`\`\`notes
+<speak>Start <break time="1s"/> here, with the <sub alias="World Wide Web Consortium">W3C</sub>.
+
+<p><prosody rate="slow" volume="soft">Slowly</prosody> on <say-as interpret-as="date" format="dmy">3/10/2026</say-as>, <lang xml:lang="it-IT">grazie</lang>.</p>
+
+- An item <break strength="strong"/> with a pause
+- And <say-as interpret-as="cardinal">42</say-as></speak>
+\`\`\`
+`;
+  const clean = (where, s) => {
+    for (const bad of ['<speak', '<break', '<sub', '<prosody', '<say-as', '<lang', 'alias', 'World Wide Web',
+                       'third of October', 'forty-two', '&lt;', 'xml:lang', 'interpret-as']) {
+      if (s.includes(bad)) throw new Error(`${where} shows ${J(bad)}: ${J(s.slice(Math.max(0, s.indexOf(bad) - 60), s.indexOf(bad) + 60))}`);
+    }
+  };
+
+  check('voice directions: no surface shows a tag or an alias, the presenter, deck and print pages, the PowerPoint notes and notesText', () => {
+    const r = R(directed);
+    const aside = r.html.match(/<aside class="notes">([\s\S]*?)<\/aside>/)[1];
+    clean('the notes markup', aside);
+    for (const want of ['<p>Start here, with the W3C.</p>', '<p>Slowly on 3/10/2026, grazie.</p>',
+                        '<li>An item with a pause</li>', '<li>And 42</li>']) {
+      if (!aside.includes(want)) throw new Error(`the notes markup lacks ${J(want)}: ${aside}`);
+    }
+    const pageAside = (page) => page.match(/<aside class="notes">([\s\S]*?)<\/aside>/)[1];
+    clean('the deck page', pageAside(deckPage(r)));
+    clean('the presenter page', pageAside(presenterPage(r, 0, 1)));
+    clean('the print page', pageAside(require('./lib/pages.js').printPage(r)));
+    /* A < that opens no tag is text, and shows as text. */
+    const lt = R(directed.replace(/```notes\n[\s\S]*?\n```/, '```notes\nx < 5 & y > 2\n```'));
+    if (!lt.html.includes('<p>x &lt; 5 &amp; y &gt; 2</p>')) throw new Error('a < that opens no tag did not show as text');
+    const text = require('./lib/render.js').notesText(parse(D + directed)[0].steps[0].note);
+    eq(text, 'Start here, with the W3C.\n\nSlowly on 3/10/2026, grazie.\n\n• An item with a pause\n• And 42', 'notesText');
+    const tt = { ...TALK };
+    const step = require('./lib/export.js').outline(D + directed, tt)[0];
+    eq(step.notes, text, 'what the export carries is notesText');
+    const parts = unzip(require('./lib/pptx.js').pptx({ title: 'T', width: 1280, height: 720,
+      slides: [{ png: PIXEL, notes: step.notes, name: '1.1' }] }));
+    const xml = parts.get('ppt/notesSlides/notesSlide1.xml').toString('utf8');
+    const said = [...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => m[1]).join('\n');
+    clean('the PowerPoint notes', said);
+    eq(said, 'Start here, with the W3C.\nSlowly on 3/10/2026, grazie.\n• An item with a pause\n• And 42', 'the PowerPoint notes, a paragraph a line');
+  });
+
+  check('voice directions: the voice reads the script with its directions, and a script without any exactly as before', () => {
+    const steps = require('./lib/export.js').outline(D + directed, TALK);
+    if (!/<sub alias="World Wide Web Consortium">W3C<\/sub>/.test(steps[0].script)) throw new Error(`the script lost its tags: ${steps[0].script}`);
+    eq(J(ssml.speech(steps[0].script)), J([
+      { text: 'Start' }, { pause: 1 }, { text: 'here, with the World Wide Web Consortium.' }, { pause: 0.6 },
+      { text: 'Slowly', volume: -5, rate: 0.9 }, { text: 'on the third of October, twenty twenty-six,' },
+      { text: 'grazie.', language: 'it-IT' }, { pause: 0.6 },
+      { text: '• An item' }, { pause: 0.75 }, { text: 'with a pause\n• And forty-two' },
+    ]), 'what the voice says');
+    /* The example's own scripts carry no directions: what the voice reads
+       is what the notes say, word for word, as it was before. */
+    for (const sl of parse(deckSrc)) for (const st of sl.steps) {
+      eq(scriptText(st.note), require('./lib/render.js').notesText(st.note), 'a plain script reads as its notes');
+    }
+  });
+}
 
 // ------------------------------------------------------------- the video
 
