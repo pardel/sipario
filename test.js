@@ -6612,6 +6612,13 @@ function pictureLength(file, ff) {
     }
   });
 
+  check('voice: lengths and moments are said rounded before they are split, never as :60', () => {
+    const { minutes } = require('./lib/cli.js');
+    const { clock } = require('./lib/voice.js');
+    eq([119.6, 179.7, 120.51, 59.4, 0, 3599.5].map(minutes).join(' '), '2:00 3:00 2:01 0:59 0:00 60:00', 'whole seconds, as the takes, the export and the voice say a length');
+    eq([239.97, 203.556, 59.95, 6.502, 0].map(clock).join(' '), '4:00.0 3:23.6 1:00.0 0:06.5 0:00.0', 'tenths, as the voice says where its sample came from');
+  });
+
   check('voice: SIPARIO_TTS unset says how to set one up, and one that is not a file is refused by name', () => {
     let err = null;
     try { tts.findTts({ PATH: process.env.PATH }); } catch (e) { err = e; }
