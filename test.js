@@ -6292,6 +6292,17 @@ check('the notes page says which version it is, and an earlier one can be asked 
 
 // ------------------------------------------------------------- the video
 
+/* How long a video's picture runs, by decoding it to the end with no
+   sound: lib/video.js's durationOf decodes the sound alone, and a picture
+   that outruns its voice would pass for the voice's length. */
+function pictureLength(file, ff) {
+  const r = require('child_process').spawnSync(ff, ['-hide_banner', '-nostdin', '-i', file, '-an', '-f', 'null', '-'], { encoding: 'utf8' });
+  const times = [...String(r.stderr).matchAll(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/g)];
+  if (r.status !== 0 || !times.length) throw new Error(`ffmpeg could not decode the picture of ${file}: ${r.stderr}`);
+  const [, h, m, s] = times[times.length - 1];
+  return Number(h) * 3600 + Number(m) * 60 + Number(s);
+}
+
 {
   const video = require('./lib/video.js');
   const { spawnSync } = require('child_process');
@@ -6396,9 +6407,12 @@ check('the notes page says which version it is, and an earlier one can be asked 
     return console.log(`  --    ${name}\n        not run: ${browser ? 'no ffmpeg' : 'no browser'} on this machine`);
   };
 
-  whenBoth('video: a take becomes an mp4 as long as its audio, and a step the deck lost is refused by name', () => {
-    /* A talk, a take of three of its steps over four seconds of tone, the
-       CLI run as a reader would. Then a step id the deck does not have. */
+  whenBoth('video: a take becomes an mp4 as long as its audio, picture and sound, and a step the deck lost is refused by name', () => {
+    /* A talk, a take of three of its steps over 26 seconds of tone, the
+       CLI run as a reader would. Then a step id the deck does not have.
+       The last step follows a long one and runs long itself, the shape
+       that once left the last slide up for a second and a half after the
+       sound had stopped. */
     const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-video-'));
     const t = path.join(dir, 'talk');
     scaffold(t);
@@ -6408,10 +6422,10 @@ check('the notes page says which version it is, and an earlier one can be asked 
     const ids = require('./lib/export.js').outline(src, tt).map((s) => s.id);
     const take = path.join(video.takesDir(require('./lib/render.js').identity(src).key, data), '2026-10-03T10-00-00');
     fs.mkdirSync(take, { recursive: true });
-    eq(spawnSync(ff, ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=4', '-c:a', 'aac',
+    eq(spawnSync(ff, ['-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=26', '-c:a', 'aac',
       path.join(take, 'audio.m4a')]).status, 0, 'the tone was made');
     const write = (marks) => fs.writeFileSync(path.join(take, 'take.json'), JSON.stringify({ audio: 'audio.m4a', marks }));
-    write([{ id: ids[0], t: 0.2 }, { id: ids[1], t: 1.5 }, { id: ids[2], t: 3 }]);
+    write([{ id: ids[0], t: 0.2 }, { id: ids[1], t: 1.5 }, { id: ids[2], t: 13 }]);
     const env = { ...process.env, SIPARIO_DATA: data };
     const run = () => spawnSync(process.execPath, [path.join(ROOT, 'bin/sipario.js'), 'export', 'video', t],
       { cwd: dir, env, encoding: 'utf8', timeout: 120000 });
@@ -6421,7 +6435,9 @@ check('the notes page says which version it is, and an earlier one can be asked 
     const mp4 = path.join(dir, `${path.basename(path.dirname(take))}-2026-10-03T10-00-00.mp4`);
     if (!fs.existsSync(mp4)) throw new Error(`no video at ${mp4}: ${ok.stdout}`);
     const len = video.durationOf(mp4, ff);
-    if (Math.abs(len - 4) > 0.15) throw new Error(`the video runs ${len}s against 4s of audio`);
+    if (Math.abs(len - 26) > 0.15) throw new Error(`the video's sound runs ${len}s against 26s of audio`);
+    const seen = pictureLength(mp4, ff);
+    if (Math.abs(seen - len) > 0.05) throw new Error(`the picture runs ${seen}s against ${len}s of sound`);
     if (!/3 stills of 3 steps/.test(ok.stdout)) throw new Error(`it did not report its stills: ${ok.stdout}`);
     if (!/from take 2026-10-03T10-00-00 \(live\)/.test(ok.stdout)) throw new Error(`it did not say what kind of take: ${ok.stdout}`);
 
@@ -6957,7 +6973,11 @@ check('the notes page says which version it is, and an earlier one can be asked 
     const mp4 = fs.readdirSync(voiced.dir).find((f) => f.endsWith('.mp4'));
     const k = video.readTake(voiced.key, null, voiced.data);
     const len = video.durationOf(path.join(voiced.dir, mp4), ff);
-    if (Math.abs(len - k.length) > 0.15) throw new Error(`the video runs ${len}s against ${k.length}s of voice`);
+    if (Math.abs(len - k.length) > 0.15) throw new Error(`the video's sound runs ${len}s against ${k.length}s of voice`);
+    /* The picture too, to within a frame and the rounding of ffmpeg's
+       clock: no slide stays up past the voice. */
+    const seen = pictureLength(path.join(voiced.dir, mp4), ff);
+    if (Math.abs(seen - k.length) > 0.05) throw new Error(`the picture runs ${seen}s against ${k.length}s of voice`);
   });
   if (voiced) voiced.done();
 
