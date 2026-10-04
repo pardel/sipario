@@ -491,6 +491,105 @@ so it counts once. No name and no address is read; the relay never
 writes a token to disk; and the file holds counts and the text of
 feedback. The phone page says so.
 
+## Directing the voice
+
+`sipario voice` reads each step's script aloud ([VOICE.md](VOICE.md)). A
+script can tell it how, with a few SSML tags in the ```` ```notes ````
+block: where to pause, what an abbreviation stands for, how to read a
+number or a date, when to slow down, speak up or change language. The tag
+set is [Vonage's](https://developer.vonage.com/en/voice/voice-api/concepts/customizing-tts),
+cut to what sipario can do itself with any engine. The opening of *Your
+next customer is a robot*, directed:
+
+```notes
+<break time="1s"/>Imagine this scenario...
+
+It's 2am on <say-as interpret-as="date" format="dmy">6/10/2026</say-as>,
+and an agent is reading our <sub alias="A P I">API</sub> docs.
+<prosody rate="slow">Nobody sent it, and nobody is watching it.</prosody>
+```
+
+On stage, in the notes window, on paper and in a PowerPoint export, the
+notes show the script with the tags taken out: "Imagine this scenario...",
+"6/10/2026", "API". A `<sub>` shows what it stands for, never the alias,
+and a `<say-as>` shows what you wrote, never the words it is read as. The
+voice hears the directions. A script with no tags reads and sounds exactly
+as it did before tags existed.
+
+| Tag | What the voice does | Values |
+|---|---|---|
+| `<speak>…</speak>` | nothing; it may wrap the whole script | none |
+| `<break time="1s"/>` | that long a silence, exactly | `1s`, `1.5s`, `500ms`, up to `10s` |
+| `<break strength="strong"/>` | a silence of a set length | `none` 0 s, `x-weak` 0.1 s, `weak` 0.25 s, `medium` 0.4 s (and a bare `<break/>`), `strong` 0.75 s, `x-strong` 1.2 s |
+| `<p>…</p>` | a paragraph: 0.6 s of silence before and after it, none at the very start or end of a step | none |
+| `<s>…</s>` | a sentence: a full stop after it if it has no ending of its own | none |
+| `<sub alias="A P I">API</sub>` | says the alias | any text |
+| `<say-as interpret-as="…">…</say-as>` | reads its text as words, below | `character`, `cardinal`, `ordinal`, `digits`, `telephone`, `date` (with `format`), `time`, `expletive` |
+| `<prosody rate="slow">…</prosody>` | slower or faster, pitch unchanged | `x-slow` 0.75×, `slow` 0.9×, `medium` 1×, `fast` 1.1×, `x-fast` 1.25×, or `50%` to `200%` |
+| `<prosody volume="soft">…</prosody>` | quieter or louder | `default` and `medium` 0 dB, `x-soft` -10 dB, `soft` -5 dB, `loud` +4 dB, `x-loud` +8 dB, `silent` (no sound, for as long as the words take), or `-40dB` to `+12dB` with its sign |
+| `<prosody pitch="high">…</prosody>` | higher or lower, length unchanged | `default` and `medium` 0, `x-low` -4, `low` -2, `high` +2, `x-high` +4 semitones, or `-50%` to `+100%` with its sign |
+| `<lang xml:lang="it-IT">…</lang>` | asks the engine for that language | a language tag: `it-IT`, `fr`, `en-GB` |
+
+Attributes take `"` or `'`. A `<` before anything but a letter, `/`, `!`
+or `?` is text, so "x < 5" needs nothing; so is `&`, since there are no
+entities.
+
+**How say-as reads**, in English, the British way:
+
+| interpret-as | Writes | Reads |
+|---|---|---|
+| `cardinal` | `2026`, `1,500`, `-3.14` | two thousand and twenty-six; one thousand five hundred; minus three point one four. Up to 999 trillion |
+| `ordinal` | `3`, `21st` | third; twenty-first |
+| `digits` | `4071` | four zero seven one |
+| `character` | `MCP`, `W3C` | each letter and digit on its own, a comma between: M, C, P; W, three, C. Without the commas Qwen3-TTS read CAT and NASA as words |
+| `telephone` | `020 7946 0958`, `+44 20 7946 0958` | in the groups you wrote, 0 as "oh", a comma between groups, where the engine pauses briefly (about 0.17 s on Qwen3-TTS): oh two oh, seven nine four six, oh nine five eight. Written without spaces, in threes |
+| `date` | `3/10/2026` with `format="dmy"` | the third of October, twenty twenty-six |
+| `time` | `1'30"`, `1:30`, `1:02:30` | a length of time: one minute thirty seconds; one hour two minutes thirty seconds |
+| `expletive` | a word | a 1 kHz bleep about as long as the word |
+
+A date is numbers, separated by `/`, `-`, `.` or a space, in the order
+`format` gives: `dmy`, `mdy`, `ymd`, `dm`, `md`, `ym`, `my`, `d`, `m`, `y`, or
+`yyyymmdd` for eight digits together. It is read the British way whatever
+the order: the day as an ordinal before the month, "the third of
+October", and the year as it is said, "twenty twenty-six", "two thousand
+and five", "nineteen oh five". `md` and `dm` read "the third of October",
+`ym` and `my` "October twenty twenty-six".
+
+**What sipario does, and what the engine does.** sipario reads the tags
+itself, so they work the same with any engine. The script is split into
+runs of text between its pauses and changes of voice; each run is one
+request to the engine, a `<sub>` or a `<say-as>` staying inside the
+sentence around it. A pause is written as silence, a bleep as a tone.
+Volume, rate and pitch are applied to a run's audio by ffmpeg once the
+engine has spoken it, so changing one never asks the engine again. Pitch
+is moved by playing the clip faster or slower and stretching it back to
+its length (this ffmpeg has no rubberband), which is heard as processed
+past a few semitones. A run in a `<lang>` is sent with its language,
+which Qwen3-TTS speaks and Chatterbox refuses unless it is English. A
+step split into runs is spoken as separate requests, and the engine
+starts each fresh, so a run of a word or two can come out flatter than
+the same words inside a sentence; direct the places that need it, not
+every line.
+
+**What is refused**, stopping the render with the slide, the step and the
+reason, because a direction the voice would ignore sitting in a script
+looks obeyed:
+
+- `<emphasis>`: no voice engine sipario drives can stress a word. Rewrite
+  the line so the word carries itself, or set it apart with `<break/>` or
+  `<prosody rate="slow">`.
+- `<phoneme>`: spell the word as it sounds instead, `<sub
+  alias="tom-AH-toe">tomato</sub>`.
+- `<say-as>` as `fraction`, `unit` or `address`: write it as it is said,
+  "three quarters", "five kilograms".
+- Any other tag, an attribute a tag does not take, a value not in the
+  table, a date that is not one, a number too large.
+- A tag left open, closed out of order, or with nothing in it; a `<p>`
+  inside a `<p>` or an `<s>`, an `<s>` inside an `<s>`, a `<speak>`
+  inside anything, or any tag inside a `<sub>` or a `<say-as>`, which hold
+  text only.
+- A comment or a declaration, `<!-- -->` or `<?xml?>`.
+
 ## What stops the render
 
 Everything below stops rather than degrades, because a slide that renders
@@ -502,6 +601,9 @@ plausibly and wrongly is worse in a room than one that never rendered.
 - A front-matter run with a line in it that is not `key: value`
 - A ```` ```notes ```` block that is never closed
 - A `Note:` line, which is what a script used to be
+- A direction to the voice sipario cannot follow: an `<emphasis>`, a
+  `<phoneme>`, any other tag or value it does not read, or a tag left
+  open ([Directing the voice](#directing-the-voice))
 - A step restating something an earlier step already shows
 - A `>` standfirst on a slide whose template never prints one
 - A talk folder with no `templates/` in it

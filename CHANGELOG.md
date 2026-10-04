@@ -36,6 +36,23 @@ so a break ships as a minor and this file is the whole of the warning.
   off a piece that runs on and applies Perth's watermark; and Chatterbox as
   the lighter alternative, whose own watermark is kept. `sipario takes` and
   `export video` say which live take a voiced one came from.
+- **Added:** directions to the voice in a script, in Vonage's SSML tags:
+  `break`, `p`, `s`, `sub`, `say-as` (character, cardinal, ordinal,
+  digits, telephone, date, time, expletive), `prosody` volume, rate and
+  pitch, `lang` and `speak`. sipario reads them itself: pauses are exact
+  silence, numbers and dates are read into British English, volume, rate
+  and pitch are put on by ffmpeg after the clip cache, and a `<lang>` goes
+  to the engine as an optional `language` in the request, which the
+  Qwen3-TTS adapter speaks in its ten languages. The notes, on stage and
+  in every export, show the script without the tags. A script without any
+  is voiced with the same requests and the same cached clips as before.
+- **Changed:** a tag in a script that sipario does not read stops the
+  render, named with its slide and step: `<emphasis>`, `<phoneme>`,
+  `say-as` fraction, unit and address, and any other tag, HTML included,
+  which used to show in the notes as text. A `<` not followed by a letter,
+  `/`, `!` or `?` is still text.
+- **Changed:** a take's `notes` keep each step's script as the voice reads
+  it, directions included, for a live take as for a voiced one.
 
 ## 0.6.0 — 2026-10-01
 

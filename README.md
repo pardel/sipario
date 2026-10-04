@@ -410,6 +410,11 @@ kept, so a run stopped part way picks up where it stopped, as long as it
 clones the same take: a newer live take voices every step again, and
 `--from` names the old one to keep its clips.
 
+A script can direct the voice with a few SSML tags: a pause, what an
+abbreviation stands for, how to read a number, a date or a phone number,
+slower, softer, higher, or another language. The notes show the script
+without them ([docs/AUTHORING.md](docs/AUTHORING.md#directing-the-voice)).
+
 ## Using it as a library
 
 ```js
@@ -463,7 +468,7 @@ way and both are one assertion in there: the slide off-centre when stacks
 became grid items, and the slide unscaled when a leftover call to a
 deleted function killed the script on its first line.
 
-The loop around that suite, what the 336 checks cover, and what to run
+The loop around that suite, what the 345 checks cover, and what to run
 before calling a change done: [`docs/DEVELOPING.md`](docs/DEVELOPING.md).
 
 ## What it does not do

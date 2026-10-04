@@ -90,25 +90,26 @@ like, so change the engine instead unless the example is what is wrong.
 npm test
 ```
 
-336 checks, one line each, with a count at the end and exit status 1 if
+345 checks, one line each, with a count at the end and exit status 1 if
 any failed. Nothing stops at the first failure: every check runs, so one
-broken thing does not hide the next. Nine checks need a browser on the
+broken thing does not hide the next. Ten checks need a browser on the
 machine: three export the example both ways and read the files back, and
 break a copy of it to see the export refuse, one photographs each
 starter's title slide and reads its QR code off the picture, one lays
 out every build step on the stage and in a phone's copy and compares
 them, one opens four deck windows and the notes at once, to see them
-share the six connections a browser allows one origin, two make a video,
-one from a recorded take and one from a voiced take, which need ffmpeg as
-well, and one records a take through the notes page with Chrome's
+share the six connections a browser allows one origin, three make a
+video, from a recorded take, a voiced take and a take with a break in a
+step, which need ffmpeg as well, and one records a take through the notes page with Chrome's
 stand-in microphone, and reads its audio back with ffmpeg when there is
-one. Five more need ffmpeg alone: the voice's own, which cut a sample from
-a take and convert the clips. Four need a network address of the
+one. Seven more need ffmpeg alone: the voice's own, which cut a sample from
+a take, convert the clips and shape a directed piece's speed, pitch and
+level. Four need a network address of the
 machine's own, to ask a served talk for its script, for the notes behind
 their link, and for the take routes, as another machine would. A check
 that cannot run prints a line saying why and is not counted either way, so
-a machine with no browser runs 327, one with a browser and no ffmpeg 329,
-and one with no browser and no network either 323.
+a machine with no browser runs 335, one with a browser and no ffmpeg 335,
+and one with no browser and no network either 331.
 
 The suite writes a room's sessions to a scratch `SIPARIO_DATA` of its
 own, so running it leaves nothing among your real ones.

@@ -584,7 +584,11 @@ English, as every piece was before sipario sent a language, so the ready
 line did not change and no clip already made is made again. The length
 check below counts characters as English prose spends them, so a piece in
 Chinese, Japanese or Korean, which says far more a character, may be
-refused as having run on; that is not measured.
+refused as having run on; that is not measured. Italian is: on 2026-10-04
+"Buongiorno a tutti, grazie mille." sent as `it-IT` came back from
+faster-whisper `small`, listening for Italian, word for word, and so did
+the same line sent with no language; how much more Italian the first
+sounds is for the ear, and nobody has listened yet.
 
 **How long a piece may come out.** Prose came out at 0.050 to 0.061 s a
 character over a deck's seven steps, and a digit or a symbol said as a
