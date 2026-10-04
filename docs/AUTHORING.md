@@ -616,6 +616,36 @@ looks obeyed:
   text only.
 - A comment or a declaration, `<!-- -->` or `<?xml?>`.
 
+### Without tags: what the punctuation does
+
+Measured on one voice, a Qwen3-TTS clone through the adapter in
+[VOICE.md](VOICE.md), on 2026-10-04: 767 clips, each variant against the
+spread four seeds give the same words. Another engine or voice may differ;
+these are the effects that held there.
+
+- **A punctuation mark gives a pause, but not a length.** Any mark adds
+  about 0.2 to 0.3 s over none; a full stop is the longest, and a comma,
+  `;`, `:`, a dash and `...` are within noise of each other. For a pause
+  of a set length, use `<break>`.
+- **Short sentences pause more.** Splitting long sentences added 0.6 to
+  1.2 s of pause across a ten-second passage without speeding the words.
+- **A `?` rises.** About four to five semitones at the end; a tag question
+  ("…, right?") rises no higher.
+- **A word set off as its own phrase,** between commas or dashes, comes out
+  a little longer and higher. It is phrasing, not stress.
+- **Blank lines and line breaks are not pauses.** The voice is sent the
+  script with its lines joined, so a new paragraph sounds like a space.
+  Use `<p>` or `<break>`.
+- **No effect:** `!`, `*italic*` and `**bold**` (taken out before the
+  voice hears them), quotes, repeating a word. CAPITALS may be spelled
+  letter by letter.
+- **Write a URL as it is said**, or put it in `<sub alias="…">`: written
+  out, `https://` is read as "https colon slash slash".
+- **The same words do not come out the same way twice.** Between
+  generations a pause moves by about 0.2 s and the pitch at the end by
+  about 3.6 semitones, so a punctuation effect is no bigger than that
+  noise. Only `<break>`, `<p>` and `<prosody>` are exact.
+
 ## What stops the render
 
 Everything below stops rather than degrades, because a slide that renders
