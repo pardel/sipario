@@ -115,7 +115,7 @@ the same one.
 | `sipario export pptx [dir]` | the deck as PowerPoint, a picture per step, the script in its notes |
 | `sipario results [dir]` | what the room said in the latest session, as JSON and CSV in the current folder |
 | `sipario takes [dir]` | the takes recorded of the deck, oldest first; `takes recover <take>` finishes one left unfinished |
-| `sipario voice [dir]` | the script read in your own voice, cloned from your latest live take, as a new take ([docs/VOICE.md](docs/VOICE.md)) |
+| `sipario voice [dir]` | the script read in the voice of the latest live take, cloned, as a new take; clone only your own ([docs/VOICE.md](docs/VOICE.md)) |
 
 `sipario-serve` and `sipario-renumber` are the same two commands under
 their own names, for the talks that already have them in their npm
@@ -399,12 +399,14 @@ into a new take beside the live one; a step with no script is held silent
 for two seconds (`--hold` changes it). The engine is not part of sipario:
 `SIPARIO_TTS` names one, and [docs/VOICE.md](docs/VOICE.md) sets up
 Chatterbox, a local model under the MIT licence, as one, and gives the
-protocol any other engine can speak. Only your own live takes are cloned,
-never a voiced one, and every Chatterbox clip carries its maker's
-inaudible watermark, which sipario keeps. Each step's clip is kept, so a
-run stopped part way picks up where it stopped, as long as it clones the
-same take: a newer live take voices every step again, and `--from` names
-the old one to keep its clips.
+protocol any other engine can speak. The voice is cloned only from a live
+take, never a voiced one, but sipario cannot tell whose voice is on a live
+take: if someone else gave the talk with V on, it is theirs, so voice a
+deck only from a take of your own. Every Chatterbox clip carries its
+maker's inaudible watermark, which sipario keeps. Each step's clip is
+kept, so a run stopped part way picks up where it stopped, as long as it
+clones the same take: a newer live take voices every step again, and
+`--from` names the old one to keep its clips.
 
 ## Using it as a library
 
@@ -459,7 +461,7 @@ way and both are one assertion in there: the slide off-centre when stacks
 became grid items, and the slide unscaled when a leftover call to a
 deleted function killed the script on its first line.
 
-The loop around that suite, what the 318 checks cover, and what to run
+The loop around that suite, what the 336 checks cover, and what to run
 before calling a change done: [`docs/DEVELOPING.md`](docs/DEVELOPING.md).
 
 ## What it does not do
