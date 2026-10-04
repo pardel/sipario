@@ -163,7 +163,10 @@ that does the following is an engine:
    `{"id": "<the same id>", "ok": true, "out": "<path>"}` once the clip is
    written and closed, or `{"id": "<the same id>", "ok": false, "error":
    "<what went wrong>"}`. The clip is a WAV, PCM (8 to 32 bits) or IEEE
-   float, any rate and any number of channels; sipario converts it.
+   float, any rate and any number of channels; sipario converts it. Write
+   it to the file named, not through a pipe into it: a WAV written to a
+   pipe never has its size filled in, and is refused, since a clip cut
+   short looks the same.
 4. **The end.** When stdin closes, the engine exits.
 
 Text is sent whole, however long: if the engine can say only so much at

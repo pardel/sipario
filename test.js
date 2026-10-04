@@ -6592,6 +6592,16 @@ function pictureLength(file, ff) {
       const cut = path.join(dir, 'cut.wav');
       fs.writeFileSync(cut, Buffer.concat([wavHeader({ rate: 24000, frames: 100 }), Buffer.alloc(50)]));
       refused(cut, /cut short: its data chunk promises 200 bytes and the file holds 50/, 'a cut-short clip passed');
+      /* What a writer whose output was a pipe leaves: a size it never came
+         back to fill in. Named as that, not as a crash. */
+      for (const [mark, said] of [[0xffffffff, '0xFFFFFFFF'], [0, '0']]) {
+        const piped = path.join(dir, 'piped.wav');
+        const ph = wavHeader({ rate: 24000, frames: 0 });
+        ph.writeUInt32LE(mark, 40);
+        fs.writeFileSync(piped, Buffer.concat([ph, Buffer.alloc(48)]));
+        refused(piped, new RegExp(`piped\\.wav does not say how much audio it holds: its data chunk's size is ${said}, with 48 bytes after it, as a WAV written through a pipe leaves it`),
+          `a WAV written through a pipe, its size ${said}, was not named as one`);
+      }
       const odd = path.join(dir, 'odd.wav');
       const h = wavHeader({ rate: 24000, frames: 2 });
       h.writeUInt32LE(3, 40);
