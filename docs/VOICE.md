@@ -102,9 +102,15 @@ sipario voice [path/to/talk] [--from <live take>] [--hold <seconds>]
    the model), and kept afterwards for any error.
 3. **Each step**, in the deck's order, is taken from the clip cache or
    sent to the engine, a line on stderr each:
-   `[voice] 3/7 0-outside: 18.42s, new in 24.0s`.
-4. **The take**: every clip converted to 24 kHz mono 16-bit, the silences
-   written for the steps with no script, all of it joined into
+   `[voice] 3/7 0-outside: 18.42s, new in 24.0s`. A step whose script
+   directs the voice is spoken in pieces, and says so:
+   `[voice] 4/7 0-dates: 5 pieces, 9.80s of speech in 3 clips (1 new in
+   6.2s, 2 cached)`.
+4. **The take**: every clip converted to 24 kHz mono 16-bit, a piece
+   with a volume, rate or pitch of its own put through ffmpeg then (so
+   changing one never asks the engine again), the silences written for
+   breaks and for the steps with no script, a 1 kHz tone for an
+   expletive, all of it joined into
    `voice.wav`, and `take.json` written last. Where each step begins is
    counted in frames from the clips' own WAV headers, so the steps sit on
    their words to the sample, however long the deck.
@@ -148,7 +154,9 @@ the other:
 ```
 
 `source` is the live take the voice was cloned from. A mark's script is
-`notes[mark.v][mark.id]`, for either kind of take. A live take's version
+`notes[mark.v][mark.id]`, for either kind of take, as the voice reads it:
+directions to the voice are kept in it, so a changed `<break>` is a
+changed script. A live take's version
 `v` is the server's reload token, a number; a voiced take's is `deck:` and
 the first twelve hex digits of the SHA-256 of the `deck.md` it was read
 from, which cannot be mistaken for a reload token and is the same for
@@ -174,7 +182,21 @@ that does the following is an engine:
    "out": "<path>"}`, and waits for the reply before it sends the next.
    `sample` is a WAV of the voice to speak in; `out` is where to write
    the clip, a path ending `.wav` in a folder that exists. Both are
-   absolute.
+   absolute. A script that directs the voice (`docs/AUTHORING.md`,
+   Directing the voice) is sent as several requests, one for each run of
+   text between its pauses and changes of voice, every one with the
+   step's id; sipario makes the pauses and the changes of volume, rate
+   and pitch itself.
+   - **`language`**, optional: a language tag such as `it-IT`, sent with
+     a piece the script puts inside `<lang xml:lang="it-IT">`, and never
+     otherwise, so a request without it is the request as it ever was.
+     An engine may ignore it, or answer `ok: false` for a language it
+     cannot speak, which stops the run named with the step. A clip in a
+     language is cached under its language as well; one without stays
+     where it always was. An engine that starts honouring `language`
+     where it ignored it before changes its ready line, as for any change
+     to the voice it makes, or a clip made while it ignored the language
+     would be found again.
 3. **Replies.** For each request, exactly one line on stdout:
    `{"id": "<the same id>", "ok": true, "out": "<path>"}` once the clip is
    written and closed, or `{"id": "<the same id>", "ok": false, "error":
@@ -245,7 +267,8 @@ export SIPARIO_TTS=~/.local/share/sipario-tts-qwen/sipario-tts    # in your shel
 """sipario-tts: Qwen3-TTS (Alibaba Qwen, Apache-2.0) speaking sipario's
 voice protocol (docs/VOICE.md in sipario).
 
-stdin:  one request a line, {"id", "text", "sample", "out"}
+stdin:  one request a line, {"id", "text", "sample", "out"}, and "language"
+        (it-IT) when the text is in one
 stdout: {"ready": true, ...} once the models are loaded, then one reply a
         request, {"id", "ok": true, "out"} or {"id", "ok": false, "error"}
 stderr: everything else. Exits when stdin closes.
@@ -305,6 +328,13 @@ LIMIT = 800
 PAUSE = 0.25
 TRIES = 3
 FRAMES = 12.5         # codec frames a second of speech
+# The languages Qwen3-TTS speaks (its config's codec_language_id), by the
+# language tag sipario sends. A request with no language is English, as
+# every request was before sipario sent one, so the clips are the same
+# clips and the ready line, which they are cached under, is the same line.
+LANGUAGES = {"en": "English", "it": "Italian", "de": "German", "fr": "French",
+             "es": "Spanish", "pt": "Portuguese", "zh": "Chinese",
+             "ja": "Japanese", "ko": "Korean", "ru": "Russian"}
 
 ffmpeg = shutil.which("ffmpeg")
 if not ffmpeg:
@@ -408,7 +438,17 @@ def prepare(sample):
     return prompt, words
 
 
-def speak(piece, prompt, seed):
+def language(tag):
+    if not tag:
+        return "English"
+    name = LANGUAGES.get(tag.split("-")[0].lower())
+    if not name:
+        raise ValueError(f"Qwen3-TTS speaks {', '.join(sorted(LANGUAGES.values()))}, "
+                         f"and not {tag}")
+    return name
+
+
+def speak(piece, prompt, seed, lang):
     """One piece, made again with the next seed if its length is far off
     what its text needs. Prose came out at 0.050 to 0.061 s a character
     over a deck's seven steps; a digit or a symbol said as a word ($, %, /,
@@ -423,7 +463,7 @@ def speak(piece, prompt, seed):
         torch.manual_seed(seed + t)
         np.random.seed((seed + t) % 2**32)
         wavs, rate = model.generate_voice_clone(
-            text=piece, language="English", voice_clone_prompt=prompt,
+            text=piece, language=lang, voice_clone_prompt=prompt,
             temperature=TEMPERATURE, top_k=TOP_K, max_new_tokens=int(FRAMES * (most + 2)))
         wav = np.asarray(wavs[0], dtype=np.float32)
         secs = len(wav) / rate
@@ -459,6 +499,7 @@ for line in sys.stdin:
     try:
         req = json.loads(line)
         rid = req.get("id")
+        lang = language(req.get("language"))
         # Levelling and transcribing take seconds; a run sends the same
         # sample for every step, so it is done once.
         key = (req["sample"], os.stat(req["sample"]).st_mtime_ns)
@@ -468,7 +509,7 @@ for line in sys.stdin:
         gap = np.zeros(int(sr * PAUSE), dtype=np.float32)
         clips = []
         for piece in pieces(req["text"]):
-            clips += [speak(piece, voice[1], seed), gap]
+            clips += [speak(piece, voice[1], seed, lang), gap]
         wav = level(np.concatenate(clips[:-1])) if clips else np.zeros(0, dtype=np.float32)
         # Qwen3-TTS marks nothing it makes, so the adapter does, with
         # Resemble AI's Perth, and reads the mark back off the 16-bit
@@ -533,6 +574,17 @@ stage) are the checkpoint's own `generation_config.json`.
 broken at sentence ends, with a quarter of a second between them. That is
 margin, not the model's limit: a 1581-character paragraph came out whole
 in a single call, 81 s with every word heard back by the transcriber.
+
+**Languages.** A piece sent with a `language` is spoken in the language
+Qwen3-TTS knows by that tag's first part: `en` English, `it` Italian, `de`
+German, `fr` French, `es` Spanish, `pt` Portuguese, `zh` Chinese, `ja`
+Japanese, `ko` Korean, `ru` Russian, the ten its checkpoint lists. Any
+other is answered `ok: false`, naming the ten. A piece without one is
+English, as every piece was before sipario sent a language, so the ready
+line did not change and no clip already made is made again. The length
+check below counts characters as English prose spends them, so a piece in
+Chinese, Japanese or Korean, which says far more a character, may be
+refused as having run on; that is not measured.
 
 **How long a piece may come out.** Prose came out at 0.050 to 0.061 s a
 character over a deck's seven steps, and a digit or a symbol said as a
@@ -613,7 +665,8 @@ export SIPARIO_TTS=~/.local/share/sipario-tts/sipario-tts    # in your shell's p
 """sipario-tts: Chatterbox (Resemble AI, MIT) speaking sipario's voice
 protocol (docs/VOICE.md in sipario).
 
-stdin:  one request a line, {"id", "text", "sample", "out"}
+stdin:  one request a line, {"id", "text", "sample", "out"}, and "language"
+        (it-IT) when the text is in one
 stdout: {"ready": true, ...} once the model is loaded, then one reply a
         request, {"id", "ok": true, "out"} or {"id", "ok": false, "error"}
 stderr: everything else. Exits when stdin closes.
@@ -700,6 +753,12 @@ for line in sys.stdin:
     try:
         req = json.loads(line)
         rid = req.get("id")
+        # Chatterbox speaks English and nothing else: a piece in another
+        # language is refused, not read out in English sounds.
+        lang = req.get("language")
+        if lang and lang.split("-")[0].lower() != "en":
+            raise ValueError(f"Chatterbox speaks English only, and this piece is in {lang}; "
+                             "Qwen3-TTS speaks it, or take the <lang> out")
         # Conditioning on a sample takes seconds; a run sends the same one
         # for every step, so it is done once.
         key = (req["sample"], os.stat(req["sample"]).st_mtime_ns)
