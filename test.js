@@ -7389,6 +7389,195 @@ process.exit(r.status === null ? 1 : r.status);
       gaps.done();
     }
   });
+
+  /* Directions to the voice, spoken. A clip of sine to shape, a WAV made
+     here at `rate`, `frames` long and as loud as the fake engine's. */
+  const voiceLib = require('./lib/voice.js');
+  const J = JSON.stringify;
+  const sineWav = (file, rate, frames, hz = 220, amp = 9000) => {
+    const b = Buffer.alloc(frames * 2);
+    for (let i = 0; i < frames; i++) b.writeInt16LE(Math.round(amp * Math.sin(2 * Math.PI * hz * i / rate)), i * 2);
+    fs.writeFileSync(file, Buffer.concat([wavHeader({ rate, frames }), b]));
+  };
+  const samples = (file) => {
+    const w = readWav(file);
+    const buf = fs.readFileSync(file).subarray(w.dataOffset, w.dataOffset + w.dataBytes);
+    return Int16Array.from({ length: w.frames }, (_, i) => buf.readInt16LE(i * 2));
+  };
+  const rms = (xs) => Math.sqrt(xs.reduce((a, x) => a + x * x, 0) / xs.length);
+  /* A tone's frequency by its rising zero crossings, over the middle of
+     the clip where nothing is fading. */
+  const pitchOf = (xs, rate) => {
+    const a = Math.floor(xs.length * 0.2);
+    const b = Math.floor(xs.length * 0.8);
+    let n = 0;
+    for (let i = a + 1; i < b; i++) if (xs[i - 1] < 0 && xs[i] >= 0) n += 1;
+    return n / ((b - a) / rate);
+  };
+
+  whenFf('voice directions: a piece is made slower or faster to the frame, its pitch moved with its length kept, its level changed by the dB asked, from 24 kHz and 16 kHz clips alike', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sipario-shape-'));
+    try {
+      eq(voiceLib.atempo(0.25).join(','), 'atempo=0.5,atempo=0.500000', 'a tempo under a half chained');
+      eq(voiceLib.atempo(3).join(','), 'atempo=2,atempo=1.500000', 'and one over two');
+      eq(voiceLib.atempo(1).length, 0, 'and none at all for no change');
+      for (const rate of [24000, 16000]) {
+        const src = path.join(dir, `s${rate}.wav`);
+        const frames = Math.round(rate * 1.2345) + 7;
+        sineWav(src, rate, frames);
+        const n24 = Math.round(frames * 24000 / rate);
+        let k = 0;
+        const make = (v) => samples(voiceLib.shape(src, v, ff, dir, `${rate}-${k++}`).file);
+        const plain = make({ volume: 0 });
+        eq(plain.length, n24, `${rate}: unchanged, as long as it was`);
+        for (const r of [0.75, 0.9, 1.25, 0.5]) {
+          eq(make({ rate: r }).length, Math.round(n24 / r), `${rate}: rate ${r}, exactly 1/${r} as long`);
+        }
+        const up = make({ pitch: 2 });
+        eq(up.length, n24, `${rate}: pitch +2 semitones keeps the length`);
+        const hz = pitchOf(up, 24000);
+        if (Math.abs(hz / (220 * 2 ** (2 / 12)) - 1) > 0.02) throw new Error(`${rate}: pitch +2 made 220 Hz into ${hz.toFixed(1)} Hz`);
+        const both = make({ rate: 0.5, pitch: 12 });
+        eq(both.length, Math.round(n24 / 0.5), `${rate}: half speed an octave up, twice as long through chained atempo`);
+        if (Math.abs(pitchOf(both, 24000) / 440 - 1) > 0.02) throw new Error(`${rate}: an octave up is ${pitchOf(both, 24000).toFixed(1)} Hz`);
+        const level = rms(plain);
+        for (const db of [-6, -10, 4]) {
+          const got = 20 * Math.log10(rms(make({ volume: db })) / level);
+          if (Math.abs(got - db) > 0.1) throw new Error(`${rate}: volume ${db}dB changed the level by ${got.toFixed(2)}dB`);
+        }
+        const loud = make({ volume: 12 });
+        if (Math.max(...loud.map(Math.abs)) > 32767 * 0.9) throw new Error(`${rate}: +12dB on a loud clip went past the limiter`);
+        eq(loud.length, n24, `${rate}: and the limiter keeps the length`);
+        eq(make({ volume: -Infinity }).every((x) => x === 0), true, `${rate}: silent is silence`);
+      }
+      const t = voiceLib.tone(4800);
+      eq(t.length, 9600, 'a tone of 4800 frames is 4800 frames');
+      const tx = Int16Array.from({ length: 4800 }, (_, i) => t.readInt16LE(i * 2));
+      if (Math.abs(pitchOf(tx, 24000) - 1000) > 10) throw new Error(`the bleep is ${pitchOf(tx, 24000)} Hz`);
+      eq(`${tx[0]} ${tx[4799]}`, '0 0', 'faded in and out');
+      if (Math.abs(Math.max(...tx) - 3277) > 2) throw new Error(`the bleep peaks at ${Math.max(...tx)}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  /* The first step's script, directed: a break, a slow phrase, a phrase
+     in Italian and an expletive. */
+  const DIRECTED = 'Hello <break time="1.5s"/> world. <prosody rate="x-slow">Slow words</prosody> and ' +
+    '<lang xml:lang="it-IT">grazie</lang>, a <say-as interpret-as="expletive">damn</say-as> end.';
+  const direct = (r, script) => {
+    const deck = path.join(r.t, 'deck.md');
+    const src = fs.readFileSync(deck, 'utf8').replace(/```notes\n[\s\S]*?\n```/, `\`\`\`notes\n${script}\n\`\`\``);
+    fs.writeFileSync(deck, src);
+    return require('./lib/export.js').outline(src, talk(r.t));
+  };
+
+  let directed = null;
+  whenFf('voice directions: a directed step is spoken as its pieces, pauses exact silence and a bleep a tone, the language sent only where given, every step after it exactly where its frames put it', () => {
+    const r = rig();
+    directed = r;
+    const steps = direct(r, DIRECTED);
+    const res = r.run(['voice', '--hold', '1.5']);
+    eq(res.status, 0, `it voiced (${res.stderr.trim().split('\n').pop()})`);
+    if (!/22 steps, 21 voiced by fake \(27 new clips, 0 cached\)/.test(res.stdout)) throw new Error(`it said ${res.stdout}`);
+    if (!new RegExp(`\\[voice\\] 1/22 ${steps[0].id}: 9 pieces, \\d+\\.\\d\\ds of speech in 7 clips \\(7 new in \\d+\\.\\ds, 0 cached\\)`).test(res.stderr)) {
+      throw new Error(`the directed step's line: ${res.stderr}`);
+    }
+    const sent = r.heard();
+    const mine = sent.filter((q) => q.id === steps[0].id);
+    eq(J(mine.map((q) => q.text)), J(['Hello', 'world.', 'Slow words', 'and', 'grazie,', 'a', 'end.']), 'one request a run of text, in order');
+    eq(J(mine.map((q) => q.language || null)), J([null, null, null, null, 'it-IT', null, null]), 'the language only on the phrase in it');
+    for (const q of sent.filter((x) => x.id !== steps[0].id)) {
+      eq(Object.keys(q).join(' '), 'id text sample out', `${q.id}: a step without directions asks as it always did`);
+      eq(q.text, steps.find((s) => s.id === q.id).notes.trim(), `${q.id}: its notes, word for word`);
+    }
+
+    const id = /^\[voice\] take (\S+):/m.exec(res.stdout)[1];
+    const at = path.join(video.takesDir(r.key, r.data), id);
+    const k = JSON.parse(fs.readFileSync(path.join(at, 'take.json'), 'utf8'));
+    const v = k.marks[0].v;
+    eq(k.notes[v][steps[0].id], steps[0].script, 'the take keeps the script the voice read, directions and all');
+    eq(k.voice.synthetic.includes(steps[0].id), true, 'and counts the directed step as voiced');
+
+    /* Every clip is in the cache under the hash it would always have had,
+       the Italian one's with its language, which a plain step's never is. */
+    const self = JSON.stringify(k.voice.ready);
+    const sample = fs.readFileSync(path.join(at, 'sample.wav'));
+    const hash = (...parts) => {
+      const h = require('crypto').createHash('sha256');
+      for (const p of ['fake', self, sample, ...parts]) h.update(p).update('\0');
+      return path.join(r.cache, `${h.digest('hex')}.wav`);
+    };
+    for (const s of steps.slice(1)) if (s.notes.trim() && !fs.existsSync(hash(s.notes.trim()))) throw new Error(`${s.id}'s clip is not where it always was`);
+    if (!fs.existsSync(hash('grazie,', 'it-IT'))) throw new Error('the Italian clip is not keyed by its language');
+    if (fs.existsSync(hash('grazie,'))) throw new Error('the Italian clip is keyed as if it had none');
+
+    /* The first step, frame by frame: the fake engine's clips alternate
+       24 kHz and 16 kHz, a 16 kHz one runs 1.5 times its frames once
+       converted (to a frame), the slow one exactly 1/0.75 of that, the
+       pause 1.5 s and the bleep 0.3 s exactly. */
+    const len = (text, n) => {
+      const f = Math.round((n % 2 ? 16000 : 24000) * 0.02 * text.length) + 7;
+      return n % 2 ? f * 1.5 : f;
+    };
+    const c = mine.map((q, n) => len(q.text, n));
+    const want = c[0] + 36000 + c[1] + Math.round(c[2] / 0.75) + c[3] + c[4] + c[5] + 7200 + c[6];
+    const t = k.marks.map((m) => Math.round(m.t * 24000));
+    const first = t[1] - t[0];
+    if (Math.abs(first - want) > 4) throw new Error(`the first step runs ${first} frames, its pieces ${want}`);
+    const w = readWav(path.join(at, 'voice.wav'));
+    const xs = samples(path.join(at, 'voice.wav'));
+    const pause = xs.subarray(c[0] + 1, c[0] + 36000 - 1);
+    eq(pause.every((x) => x === 0), true, 'the break is silence, all 1.5 s of it');
+    if (!(rms(xs.subarray(c[0] - 200, c[0])) > 1000 && rms(xs.subarray(c[0] + 36002, c[0] + 36400)) > 1000)) {
+      throw new Error('and it sits between sound');
+    }
+    const bleep = xs.subarray(t[1] - c[6] - 7200, t[1] - c[6]);
+    const blp = Int16Array.from(bleep);
+    if (Math.abs(pitchOf(blp, 24000) - 1000) > 15) throw new Error(`the bleep before the last word is ${pitchOf(blp, 24000)} Hz`);
+    const sum = k.marks.reduce((a, m, i) => a + ((i + 1 < k.marks.length ? t[i + 1] : w.frames) - t[i]), 0);
+    eq(sum, w.frames, 'the steps add up to the file');
+
+    /* A second run finds every clip; one that only slows the phrase down
+       further asks the engine for nothing, and is longer by exactly that. */
+    fs.rmSync(r.log);
+    const again = r.run(['voice', '--hold', '1.5']);
+    if (!/\(0 new clips, 27 cached\)/.test(again.stdout)) throw new Error(`the second run: ${again.stdout}`);
+    direct(r, DIRECTED.replace('rate="x-slow"', 'rate="50%"'));
+    const slower = r.run(['voice', '--hold', '1.5']);
+    eq(slower.status, 0, `it voiced slower (${slower.stderr.trim().split('\n').pop()})`);
+    eq(r.heard().length, 0, 'and asked the engine for nothing, twice');
+    const k2 = video.readTake(r.key, null, r.data);
+    const t2 = k2.marks.map((m) => Math.round(m.t * 24000));
+    const grew = (t2[1] - t2[0]) - first;
+    const by = Math.round(c[2] / 0.5) - Math.round(c[2] / 0.75);
+    if (Math.abs(grew - by) > 2) throw new Error(`slowing the phrase from 0.75 to 0.5 added ${grew} frames, not ${by}`);
+  });
+
+  whenBoth('voice directions: export video of a take with a break keeps every step on its slide, the change landing where the frames put it', () => {
+    if (!directed) throw new Error('the take before was not voiced');
+    const r = directed;
+    const k = video.readTake(r.key, null, r.data);
+    const res = r.run(['export', 'video']);
+    eq(res.status, 0, `it exported (${res.stderr.trim()})`);
+    const mp4 = path.join(r.dir, fs.readdirSync(r.dir).find((f) => f.endsWith('.mp4')));
+    const seen = pictureLength(mp4, ff);
+    if (Math.abs(seen - k.length) > 0.05) throw new Error(`the picture runs ${seen}s against ${k.length}s of voice`);
+    const frame = (s) => {
+      const out = spawnSync(ff, ['-v', 'error', '-ss', String(s), '-i', mp4, '-frames:v', '1', '-vf', 'scale=64:36',
+        '-pix_fmt', 'gray', '-f', 'rawvideo', '-'], { maxBuffer: 1 << 20 });
+      if (out.status !== 0 || out.stdout.length !== 64 * 36) throw new Error(`no frame at ${s}s: ${out.stderr}`);
+      return out.stdout;
+    };
+    const differ = (a, b) => a.reduce((n, x, i) => n + Math.abs(x - b[i]), 0) / a.length;
+    const change = k.marks[1].t;
+    if (change < 2) throw new Error(`the second step begins at ${change}s, before the first step's break has ended`);
+    const before = frame(change - 0.3);
+    if (differ(frame(0.2), before) > 1) throw new Error('the first slide does not hold through its break');
+    if (differ(before, frame(change + 0.1)) < 2) throw new Error(`the slide does not change at ${change}s, where the frames put the second step`);
+    r.done();
+  });
+
 }
 
 // ---------------------------------------------------------- the recorder
