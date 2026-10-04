@@ -6314,7 +6314,9 @@ check('the notes page says which version it is, and an earlier one can be asked 
       ["Hello <break time='500ms' /> world", 'Hello world', [{ text: 'Hello' }, { pause: 0.5 }, { text: 'world' }]],
       ['wait<break/>now', 'wait now', [{ text: 'wait' }, { pause: 0.4 }, { text: 'now' }]],
       ...Object.entries({ none: 0, 'x-weak': 0.1, weak: 0.25, medium: 0.4, strong: 0.75, 'x-strong': 1.2 }).map(([k, v]) =>
-        [`a <break strength="${k}"/> b`, 'a b', v ? [{ text: 'a' }, { pause: v }, { text: 'b' }] : [{ text: 'a' }, { text: 'b' }]]),
+        [`a <break strength="${k}"/> b`, 'a b', v ? [{ text: 'a' }, { pause: v }, { text: 'b' }] : [{ text: 'a b' }]]),
+      ['Nobody <break time="0s"/> sent it', 'Nobody sent it', [{ text: 'Nobody sent it' }]],
+      ['a<break strength="none"/>b', 'a b', [{ text: 'a b' }]],
       ['a <break time="1s"/><break time="0.5s"/> b', 'a b', [{ text: 'a' }, { pause: 1.5 }, { text: 'b' }]],
       ['<break time="2s"/>After a breath.', 'After a breath.', [{ pause: 2 }, { text: 'After a breath.' }]],
       ['<p>One.</p><p>Two.</p>', 'One. Two.', [{ text: 'One.' }, { pause: 0.6 }, { text: 'Two.' }]],
@@ -6330,9 +6332,31 @@ check('the notes page says which version it is, and an earlier one can be asked 
       ['<prosody volume="silent">Mouthed.</prosody>', 'Mouthed.', [{ text: 'Mouthed.', volume: -Infinity }]],
       ['<prosody rate="medium" volume="default" pitch="medium">Same.</prosody> Same.', 'Same. Same.', [{ text: 'Same. Same.' }]],
       ['<prosody rate="fast">a <prosody pitch="high">b</prosody></prosody>', 'a b', [{ text: 'a', rate: 1.1 }, { text: 'b', rate: 1.1, pitch: 2 }]],
+      ['<prosody volume="x-soft">quiet <prosody volume="+3dB">louder</prosody> back</prosody>', 'quiet louder back',
+        [{ text: 'quiet', volume: -10 }, { text: 'louder', volume: -7 }, { text: 'back', volume: -10 }]],
+      ['<prosody volume="x-soft">a <prosody volume="loud">b</prosody></prosody>', 'a b', [{ text: 'a', volume: -10 }, { text: 'b', volume: 4 }]],
+      ['<prosody volume="silent">a <prosody volume="+6dB">b</prosody></prosody>', 'a b', [{ text: 'a b', volume: -Infinity }]],
+      ['<prosody pitch="low">a <prosody pitch="+10%">b</prosody></prosody>', 'a b', [{ text: 'a', pitch: -2 }, { text: 'b', pitch: -2 + 12 * Math.log2(1.1) }]],
+      ['<prosody rate="x-slow">a <prosody rate="fast">b</prosody></prosody>', 'a b', [{ text: 'a', rate: 0.75 }, { text: 'b', rate: 1.1 }]],
       ['Then <lang xml:lang="it-IT">buongiorno</lang>.', 'Then buongiorno.', [{ text: 'Then' }, { text: 'buongiorno.', language: 'it-IT' }]],
       ['A <say-as interpret-as="expletive">damn</say-as> shame.', 'A damn shame.', [{ text: 'A' }, { tone: 0.3 }, { text: 'shame.' }]],
-      ['<speak>\n<p>Line one\nline two.</p>\n</speak>', '\nLine one\nline two.\n', [{ text: 'Line one\nline two.' }]],
+      ['<prosody volume="silent">Well <say-as interpret-as="expletive">damn</say-as> it</prosody>', 'Well damn it',
+        [{ text: 'Well', volume: -Infinity }, { tone: 0.3, volume: -Infinity }, { text: 'it', volume: -Infinity }]],
+      ['<prosody rate="x-slow" volume="x-soft">A <say-as interpret-as="expletive">damn</say-as></prosody>', 'A damn',
+        [{ text: 'A', volume: -10, rate: 0.75 }, { tone: 0.4, volume: -10 }]],
+      /* A tag on a line of its own takes its line with it in the notes. */
+      ['<speak>\n<p>Line one\nline two.</p>\n</speak>', 'Line one\nline two.', [{ text: 'Line one\nline two.' }]],
+      ['1. alpha\n<break time="1s"/>\n2. beta', '1. alpha\n2. beta', [{ text: '1. alpha' }, { pause: 1 }, { text: '2. beta' }]],
+      ['Line a.\n\n<break time="1s"/>\nLine b.', 'Line a.\n\nLine b.', [{ text: 'Line a.' }, { pause: 1 }, { text: 'Line b.' }]],
+      ['Line a.<break time="1s"/>\n\nLine b.', 'Line a.\n\nLine b.', [{ text: 'Line a.' }, { pause: 1 }, { text: 'Line b.' }]],
+      /* A < that opens no whole tag is text, as it was before tags; an
+         entity is how to write one that would be a tag. */
+      ['See <https://example.com> for more', 'See <https://example.com> for more', [{ text: 'See <https://example.com> for more' }]],
+      ['Mail <paul@pardel.dev>,  then', 'Mail <paul@pardel.dev>,  then', [{ text: 'Mail <paul@pardel.dev>,  then' }]],
+      ['if a<b then', 'if a<b then', [{ text: 'if a<b then' }]],
+      ['Press &lt;Enter&gt;, Vector&lt;T&gt;', 'Press <Enter>, Vector<T>', [{ text: 'Press <Enter>, Vector<T>' }]],
+      ['R&amp;D, &amp;lt;, &nbsp;', 'R&D, &lt;, &nbsp;', [{ text: 'R&D, &lt;, &nbsp;' }]],
+      ['&lt;break/&gt; <break time="1s"/> <sub alias="R and D">R&amp;D</sub>', '<break/> R&D', [{ text: '<break/>' }, { pause: 1 }, { text: 'R and D' }]],
     ];
     for (const [src, shown, said] of table) {
       eq(ssml.plain(src), shown, `the notes show ${J(src)} as`);
@@ -6350,7 +6374,19 @@ check('the notes page says which version it is, and an earlier one can be asked 
       ['<say-as interpret-as="fraction">3/4</say-as>', /^<say-as interpret-as="fraction"> is not read: write the fraction as it is said, "three quarters"$/],
       ['<say-as interpret-as="unit">5kg</say-as>', /^<say-as interpret-as="unit"> is not read: write the unit as it is said, "five kilograms"$/],
       ['<say-as interpret-as="address">1 Main St</say-as>', /^<say-as interpret-as="address"> is not read: write the address as it is said$/],
-      ['<foo>x</foo>', /^<foo> is not a tag sipario reads: it reads speak, break, p, s, sub, say-as, prosody and lang$/],
+      ['<foo>x</foo>', /^<foo> is not a tag sipario reads: it reads speak, break, p, s, sub, say-as, prosody and lang\. A < meant as text is written &lt;$/],
+      ['Press <Enter> to go', /^<Enter> is not a tag sipario reads: .* written &lt;$/],
+      ['a<p then', /^"<p then" is not a whole tag/],
+      ['Say <sub alias="">API</sub> now', /^<sub alias=""> gives the voice nothing to say: the alias is the words said in place of the text$/],
+      ['<sub alias=" . ">API</sub>', /^<sub alias=" \. "> gives the voice nothing to say/],
+      ['a<p></p>b', /^<p> holds no text$/],
+      ['<s></s>x', /^<s> holds no text$/],
+      ['<speak> </speak>', /^<speak> holds no text$/],
+      ['<prosody rate="slow"></prosody>Nobody sent it.', /^<prosody> holds no text$/],
+      ['<lang xml:lang="it-IT"> </lang>ok', /^<lang> holds no text$/],
+      ['<p><break time="1s"/></p>', /^<p> holds no text$/],
+      ['<prosody volume="x-loud"><prosody volume="+12dB">x</prosody></prosody>', /^<prosody volume="\+12dB"> inside a volume of \+8dB comes to \+20dB, past the -40dB to \+12dB a voice is taken to$/],
+      ['<prosody pitch="+100%"><prosody pitch="+10%">x</prosody></prosody>', /^<prosody pitch="\+10%"> inside a raised or lowered pitch comes past the -50% to \+100% a voice is taken to$/],
       ['<b>bold</b>', /^<b> is not a tag sipario reads/],
       ['<break pause="1s"/>', /^<break> has no attribute pause: it takes time or strength$/],
       ['<p class="x">a</p>', /^<p> has no attribute class: it takes none$/],
@@ -6553,6 +6589,45 @@ A line.
     const said = [...xml.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => m[1]).join('\n');
     clean('the PowerPoint notes', said);
     eq(said, 'Start here, with the W3C.\nSlowly on 3/10/2026, grazie.\n• An item with a pause\n• And 42', 'the PowerPoint notes, a paragraph a line');
+  });
+
+  check('voice directions: a tag on a line of its own, or around a list, leaves the list and the paragraph whole, in the notes and in what the voice is sent', () => {
+    const { notesText: nt } = require('./lib/render.js');
+    const cases = [
+      /* [script, the notes as text, what the voice says] */
+      ['<prosody rate="slow">\n- one\n- two\n</prosody>', '• one\n• two', [{ text: '• one\n• two', rate: 0.9 }]],
+      ['<speak>\n1. one\n2. two\n</speak>', '1. one\n2. two', [{ text: '1. one\n2. two' }]],
+      ['<p>- one\n- two</p>', '• one\n• two', [{ text: '• one\n• two' }]],
+      ['1. alpha\n<break time="1s"/>\n2. beta\n3. gamma', '1. alpha\n2. beta\n3. gamma',
+        [{ text: '1. alpha' }, { pause: 1 }, { text: '2. beta\n3. gamma' }]],
+      ['1. one\n<prosody rate="slow">\n2. two\n3. three\n</prosody>\n4. four', '1. one\n2. two\n3. three\n4. four',
+        [{ text: '1. one' }, { text: '2. two\n3. three', rate: 0.9 }, { text: '4. four' }]],
+      ['It\'s 2am.\n<break time="1s"/>\nNobody sent it.', 'It\'s 2am. Nobody sent it.',
+        [{ text: 'It\'s 2am.' }, { pause: 1 }, { text: 'Nobody sent it.' }]],
+    ];
+    for (const [note, text, said] of cases) {
+      eq(nt(note), text, `the notes of ${J(note)}`);
+      eq(J(ssml.speech(scriptText(note))), J(said), `the voice for ${J(note)}`);
+    }
+    const r = R(directed.replace(/```notes\n[\s\S]*?\n```/, '```notes\n1. alpha\n<break time="1s"/>\n2. beta\n3. gamma\n\nLine a.\n<break time="1s"/>\nLine b.\n```'));
+    const aside = r.html.match(/<aside class="notes">([\s\S]*?)<\/aside>/)[1];
+    eq((aside.match(/<ol>/g) || []).length, 1, 'one list on stage');
+    if (!aside.includes('<ol><li>alpha</li><li>beta</li><li>gamma</li></ol>')) throw new Error(`the list on stage: ${aside}`);
+    if (!aside.includes('<p>Line a. Line b.</p>')) throw new Error(`the paragraph on stage: ${aside}`);
+  });
+
+  check('voice directions: a template printing {{note}} shows the script as the notes do, without a tag', () => {
+    const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sipario-spoken-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'spoken.html'), '<p class="spoken">{{note}}</p>\n');
+      const r = render(`${D}# One\n\n## 1.1\nid: 1-a\ntemplate: spoken\n\n\nA line.\n\n\`\`\`notes\nOur <sub alias="A P I">API</sub> is <break time="1s"/> fast.\n\`\`\`\n`,
+        { templateRoot: dir, imageRoot: TALK.imageRoot });
+      const said = r.html.match(/<p class="spoken">([^<]*)<\/p>/);
+      if (!said) throw new Error(`the template's note is not on the slide: ${r.html.slice(0, 400)}`);
+      eq(said[1], 'Our API is fast.', 'the slide shows');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   check('voice directions: the voice reads the script with its directions, and a script without any exactly as before', () => {
@@ -7450,12 +7525,36 @@ process.exit(r.status === null ? 1 : r.status);
         eq(loud.length, n24, `${rate}: and the limiter keeps the length`);
         eq(make({ volume: -Infinity }).every((x) => x === 0), true, `${rate}: silent is silence`);
       }
+      /* The length above is cut to by atrim whatever the tempo was; where
+         the sound ends is what says the tempo was right. A second of tone
+         then half a second of silence, so a wrong tempo cannot hide under
+         the padding. */
+      const burst = path.join(dir, 'burst.wav');
+      sineWav(burst, 24000, 36000);
+      const bb = fs.readFileSync(burst);
+      bb.fill(0, readWav(burst).dataOffset + 24000 * 2);
+      fs.writeFileSync(burst, bb);
+      const ends = (v) => {
+        const xs = samples(voiceLib.shape(burst, v, ff, dir, `burst-${JSON.stringify(v).replace(/\W/g, '')}`).file);
+        let i = xs.length - 1;
+        while (i > 0 && Math.abs(xs[i]) < 500) i -= 1;
+        return i / 24000;
+      };
+      for (const [v, at] of [[{ rate: 0.5 }, 2], [{ rate: 0.75 }, 1 / 0.75], [{ rate: 0.9 }, 1 / 0.9], [{ rate: 1.25 }, 0.8],
+                             [{ pitch: 2 }, 1], [{ pitch: -4 }, 1], [{ rate: 0.5, pitch: 12 }, 2]]) {
+        const got = ends(v);
+        if (Math.abs(got / at - 1) > 0.015) throw new Error(`${JSON.stringify(v)}: a second of sound ends at ${got.toFixed(3)}s, not ${at.toFixed(3)}s`);
+      }
       const t = voiceLib.tone(4800);
       eq(t.length, 9600, 'a tone of 4800 frames is 4800 frames');
       const tx = Int16Array.from({ length: 4800 }, (_, i) => t.readInt16LE(i * 2));
       if (Math.abs(pitchOf(tx, 24000) - 1000) > 10) throw new Error(`the bleep is ${pitchOf(tx, 24000)} Hz`);
       eq(`${tx[0]} ${tx[4799]}`, '0 0', 'faded in and out');
       if (Math.abs(Math.max(...tx) - 3277) > 2) throw new Error(`the bleep peaks at ${Math.max(...tx)}`);
+      const soft = voiceLib.tone(4800, -10);
+      const sx = Int16Array.from({ length: 4800 }, (_, i) => soft.readInt16LE(i * 2));
+      if (Math.abs(Math.max(...sx) - 3277 * 10 ** -0.5) > 2) throw new Error(`a bleep 10dB softer peaks at ${Math.max(...sx)}`);
+      eq(voiceLib.tone(4800, -Infinity).every((x) => x === 0), true, 'a silent bleep is silence');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
