@@ -414,8 +414,9 @@ clones the same take: a newer live take voices every step again, and
 
 A script can tell the voice how to read it with a few SSML tags in the
 ```` ```notes ```` block. sipario reads them itself, so they work the same
-with any engine, and the notes, on stage and in every export, show the
-script with them taken out. The ones most scripts need:
+with any engine (a `<lang>` excepted: the engine must speak that
+language), and the notes, on stage and in every export, show the script
+with them taken out. The ones most scripts need:
 
 | Tag | The voice |
 |---|---|
@@ -425,7 +426,7 @@ script with them taken out. The ones most scripts need:
 | `<say-as interpret-as="cardinal">1,500</say-as>` | "one thousand five hundred" |
 | `<say-as interpret-as="character">MCP</say-as>` | "M, C, P", letter by letter |
 | `<prosody rate="slow">…</prosody>` | 0.9× as fast, pitch unchanged; `x-slow` to `x-fast`, or `50%` to `200%` |
-| `<prosody volume="soft">…</prosody>` | 5 dB quieter; `x-soft` to `x-loud`, `silent`, or `-6dB` |
+| `<prosody volume="soft">…</prosody>` | 5 dB quieter; `x-soft` to `x-loud`, `silent`, or a signed change from `-40dB` to `+12dB`, `-6dB` |
 
 A tag sipario cannot follow, `<emphasis>` and `<phoneme>` among them,
 stops the render rather than sitting in the script looking obeyed. Every

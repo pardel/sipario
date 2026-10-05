@@ -11,8 +11,8 @@ The tag set is
 [Vonage's](https://developer.vonage.com/en/voice/voice-api/concepts/customizing-tts),
 cut to what sipario can do itself with any engine. sipario reads the tags
 and does the work; the engine is asked only to say words, with a language
-when a `<lang>` gives one, so a direction comes out the same whichever
-engine speaks it.
+when a `<lang>` gives one, so every direction but `<lang>` comes out the
+same whichever engine speaks it.
 
 **Two tags are not settled.** `<prosody pitch>` and `<lang>` work and are
 checked by the suite, but whether they sound good enough to keep is
@@ -96,6 +96,7 @@ Second<break strength="weak"/>the deck.
 
 A silence, written into the audio as silence, so it is exactly as long as
 asked. It takes `time` or `strength`; with neither, it is `medium`.
+Given both, `time` is used and `strength` ignored.
 
 | Attribute | Values | Comes to |
 |---|---|---|
@@ -122,11 +123,12 @@ See [Clip edges](#clip-edges).
 <p>The relay counts what they send.</p>
 ```
 
-`<p>` is a paragraph: 0.6 s of silence before it and after it. A break
-beside a paragraph meets its 0.6 s as the longer of the two rather than
-adding to it. A paragraph's silence at the very start or very end of a
-step is dropped, because the step before ends and the next begins without
-it; a `<break>` there was asked for, and stays.
+`<p>` is a paragraph: 0.6 s of silence before it and after it. Two
+paragraphs side by side share one 0.6 s, not two. A break beside a
+paragraph meets its 0.6 s as the longer of the two rather than adding to
+it. A paragraph's silence at the very start or very end of a step is
+dropped, because the step before ends and the next begins without it; a
+`<break>` there was asked for, and stays.
 
 `<s>` is a sentence: a full stop after it if it has no ending of its own
 (`.`, `!`, `?`, `…`, `;`, `:` or `,`). Sentences side by side stay one
@@ -168,9 +170,9 @@ Since <say-as interpret-as="date" format="dmy">3/10/2026</say-as>,
 
 Reads its text into words before the engine sees it, in English, the
 British way. The words stay inside the sentence around it, as with
-`<sub>`. `interpret-as` is required; `format` is for a date, is required
-there, and is refused on anything else. `<say-as>` holds text only; a tag
-inside it is refused.
+`<sub>`; only a bleep splits it. `interpret-as` is required; `format` is
+for a date, is required there, and is refused on anything else.
+`<say-as>` holds text only; a tag inside it is refused.
 
 | interpret-as | Writes | Reads |
 |---|---|---|
@@ -235,7 +237,8 @@ in a place that counts to 59 stops the render.
 **expletive.** The word is not sent to the engine. In its place is a
 1 kHz tone about as long as the word would have taken: 0.075 s a
 character, at least 0.3 s. It takes the volume around it, so it is
-silent inside a `silent`, and is stretched with the rate around it.
+silent inside a `silent`, and is stretched with the rate around it. Like
+a `<break>`, it splits the sentence around it into two requests.
 
 Vonage's `fraction`, `unit` and `address` are refused
 ([What is refused](#what-is-refused)).
@@ -263,7 +266,7 @@ Slower or faster, pitch unchanged.
 | `medium` | 1× |
 | `fast` | 1.1× |
 | `x-fast` | 1.25× |
-| `50%` to `200%` | a percentage of the voice's own: `80%` is 0.8× |
+| `50%` to `200%` | a percentage of the voice's own, written without a sign: `80%` is 0.8× |
 
 A rate always replaces the one around it; it never compounds. `slow`
 inside `fast` is 0.9×.
@@ -337,8 +340,8 @@ the first sounds is for the ear.
 
 ## speak
 
-Does nothing. It may wrap the whole script, as in an SSML document, and
-nothing else: a `<speak>` inside any tag is refused.
+Does nothing. It is there so a script can be wrapped like an SSML
+document; a `<speak>` inside any other tag is refused.
 
 ## Nesting
 
@@ -375,9 +378,9 @@ stop the render as tags sipario does not read. Write `&lt;Enter&gt;` and
 ## What is refused
 
 A refused tag stops the render, named with its slide, its step and the
-reason, every step with one named at once. It is refused rather than passed over
-because a direction the voice would ignore, left sitting in a script,
-looks obeyed.
+reason; every step that has one is named at once, not just the first. It
+is refused rather than passed over because a direction the voice would
+ignore, left sitting in a script, looks obeyed.
 
 | Refused | Why | Write instead |
 |---|---|---|
@@ -396,15 +399,16 @@ looks obeyed.
 
 The script is split into runs of text between its pauses and its changes
 of voice. Each run is one request to the engine; text beside text in the
-same voice is one run, so a `<sub>` or a `<say-as>` keeps the sentence
-around it whole. A pause is written as silence, a bleep as a tone, and
-the volume, rate and pitch of a run are applied to its audio afterwards.
+same voice is one run, so a `<sub>` or any `<say-as>` but `expletive`
+keeps the sentence around it whole. A pause is written as silence, a
+bleep as a tone, and the volume, rate and pitch of a run are applied to
+its audio afterwards.
 
-A `<break>`, a `<p>`, a `<prosody>` or a `<lang>` in the middle of a
-sentence therefore splits it into separate requests, and the engine
-starts each one fresh. A run of a word or two can come out flatter than
-the same words inside a sentence. Direct the places that need it, not
-every line.
+A `<break>`, a `<p>`, a `<prosody>` that changes the voice, a `<lang>`
+or an expletive in the middle of a sentence therefore splits it into
+separate requests, and the engine starts each one fresh. A run of a
+word or two can come out flatter than the same words inside a sentence.
+Direct the places that need it, not every line.
 
 ## Measured on Qwen3-TTS
 
@@ -432,8 +436,8 @@ Read back by faster-whisper: letters with nothing between them ran into a
 word (CAT, NASA and GIF heard as words); with a space between them GIF
 was still heard as a word; with a hyphen or a comma every one was
 spelled, the comma the most apart, 0.25 to 0.58 s a letter. Glued dots
-read W.3.C. as "W2HTHD". `character` puts a
-comma between them for this reason.
+read W.3.C. as "W2HTHD". `character` puts a comma between them for this
+reason.
 
 ### Phone numbers
 
@@ -442,7 +446,7 @@ silences would make each group a request of two or three words of its
 own, which a model reads worse than a sentence, so the number stays one
 request with commas in it.
 
-## Without tags: what the punctuation does
+### Without tags: what the punctuation does
 
 Measured on the same voice, the same day: 767 clips, each variant
 against the spread four seeds give the same words. These are the effects

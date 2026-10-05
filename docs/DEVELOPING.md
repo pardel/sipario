@@ -72,7 +72,7 @@ to exactly what the lockfile says.
 | `js/` | what runs in the browser: `deck.js` in the room, `presenter.js` in the notes, `audience.js` in both for a deck that opens the room, `qr.js`, which draws the join code there and the notes' link in the notes, and loads under Node for the suite, `phone.js` on the audience's phones, and `remote.js`, the three ends of the notes on another device: the deck here, the link in the notes here, and the notes there |
 | `css/` | the frame's stylesheet, the presenter's, the print page's and the phone page's, and no talk's design |
 | `bin/` | argv, and nothing else; the commands are in `lib/cli.js` |
-| `docs/` | the format, writing a template, and the calls behind the engine |
+| `docs/` | the format, writing a template, directing the voice, and the calls behind the engine |
 | `starters/minimal/` | the shortest complete talk |
 | `starters/stylish/` | the same deck in a different dress: the look is the talk's, not the frame's |
 | `test.js` | the suite |
