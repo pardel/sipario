@@ -508,6 +508,17 @@ It's 2am, and an agent is reading our <sub alias="A P I">API</sub> docs.
 Every tag, value and refusal, and what was measured on Qwen3-TTS,
 including what plain punctuation does without tags: [SSML.md](SSML.md).
 
+Text in square brackets is a stage direction, for you and not the voice:
+the notes show it as written, and it is never spoken. A direction alone on
+its line takes the line with it, and a step of nothing but directions is
+held silent. A bracket a word runs into (`arr[0]`) and a link's
+`[text](url)` are read as words.
+
+```notes
+[If phones cannot connect, ask for a show of hands.]
+Which of these has an agent read this week?
+```
+
 ## What stops the render
 
 Everything below stops rather than degrades, because a slide that renders

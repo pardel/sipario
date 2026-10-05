@@ -39,6 +39,8 @@ so a break ships as a minor and this file is the whole of the warning.
   off a piece that runs on and applies Perth's watermark; and Chatterbox as
   the lighter alternative, whose own watermark is kept. `sipario takes` and
   `export video` say which live take a voiced one came from.
+- **Added:** text in square brackets in a script is a stage direction:
+  shown in the notes, never spoken by `sipario voice`.
 - **Added:** directions to the voice in a script, in Vonage's SSML tags:
   `break`, `p`, `s`, `sub`, `say-as` (character, cardinal, ordinal,
   digits, telephone, date, time, expletive), `prosody` volume, rate and

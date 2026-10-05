@@ -6357,6 +6357,16 @@ check('the notes page says which version it is, and an earlier one can be asked 
       ['Press &lt;Enter&gt;, Vector&lt;T&gt;', 'Press <Enter>, Vector<T>', [{ text: 'Press <Enter>, Vector<T>' }]],
       ['R&amp;D, &amp;lt;, &nbsp;', 'R&D, &lt;, &nbsp;', [{ text: 'R&D, &lt;, &nbsp;' }]],
       ['&lt;break/&gt; <break time="1s"/> <sub alias="R and D">R&amp;D</sub>', '<break/> R&D', [{ text: '<break/>' }, { pause: 1 }, { text: 'R and D' }]],
+      /* A stage direction is shown and never spoken; a line of them goes
+         with its line, and a step of nothing else says nothing. A bracket
+         a word runs into, and a link, are words. */
+      ['Hello [smile] world', 'Hello [smile] world', [{ text: 'Hello world' }]],
+      ['A.\n\n[Read the results out.]\n[If phones fail, ask.]\n\nB.', 'A.\n\n[Read the results out.]\n[If phones fail, ask.]\n\nB.', [{ text: 'A.\n\nB.' }]],
+      ['[only this]', '[only this]', []],
+      ['[x]...', '[x]...', []],
+      ['arr[0] and [docs](https://example.com)', 'arr[0] and [docs](https://example.com)', [{ text: 'arr[0] and [docs](https://example.com)' }]],
+      ['Say <sub alias="A P I">API</sub> [aside] now', 'Say API [aside] now', [{ text: 'Say A P I now' }]],
+      ['[cue] <break time="1s"/> Go.', '[cue] Go.', [{ pause: 1 }, { text: 'Go.' }]],
     ];
     for (const [src, shown, said] of table) {
       eq(ssml.plain(src), shown, `the notes show ${J(src)} as`);
