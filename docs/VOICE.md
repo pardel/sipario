@@ -83,7 +83,7 @@ recording even to a reader without a detector.
 ## Running it
 
 ```
-sipario voice [path/to/talk] [--from <live take>] [--hold <seconds>]
+sipario voice [path/to/talk] [--from <live take>] [--hold <seconds>] [--sample <seconds>]
 ```
 
 1. **The sample.** From the latest live take, or the one `--from` names,
@@ -97,6 +97,10 @@ sipario voice [path/to/talk] [--from <live take>] [--hold <seconds>]
    which is why a pause is a second and not less. With no stretch of ten,
    the longest serves, down to five seconds; a take without five seconds
    of speech at a stretch is refused, with the longest it found.
+   `--sample <seconds>` asks for another length, five or more, cut by
+   the same rule: for Qwen3-TTS, which listens to all of it, and never
+   for Chatterbox, which still hears the first ten. A longer sample is
+   another voice, so every step is voiced again in it.
 2. **The engine** is started once for the run and reports that it is
    ready. Its log is shown while it gets ready (the first run downloads
    the model), and kept afterwards for any error.

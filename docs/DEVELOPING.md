@@ -90,7 +90,7 @@ like, so change the engine instead unless the example is what is wrong.
 npm test
 ```
 
-347 checks, one line each, with a count at the end and exit status 1 if
+348 checks, one line each, with a count at the end and exit status 1 if
 any failed. Nothing stops at the first failure: every check runs, so one
 broken thing does not hide the next. Ten checks need a browser on the
 machine: three export the example both ways and read the files back, and

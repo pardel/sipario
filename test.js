@@ -7465,6 +7465,32 @@ process.exit(r.status === null ? 1 : r.status);
     }
   });
 
+  whenFf('voice: --sample cuts a longer sample by the same rule, the longest stretch when none runs that long, and never under five', () => {
+    const r = rig();
+    try {
+      const kept = (res) => {
+        const id = /^\[voice\] take (\S+):/m.exec(res.stdout)[1];
+        return JSON.parse(fs.readFileSync(path.join(video.takesDir(r.key, r.data), id, 'take.json'), 'utf8')).voice.sample;
+      };
+      /* The rig's speech runs from 6.5 s to the end at 22 s: 15.5 s. */
+      const twelve = r.run(['voice', '--sample', '12']);
+      eq(twelve.status, 0, `it voiced (${twelve.stderr.trim().split('\n').pop()})`);
+      const a = kept(twelve);
+      if (Math.abs(a.offset - 6.5) > 0.1 || Math.abs(a.length - 12) > 0.05) throw new Error(`12 s asked, ${a.length}s cut from ${a.offset}s`);
+      if (!/21 voiced by fake \(21 new, 0 cached\)/.test(twelve.stdout)) throw new Error(`another sample is another voice: ${twelve.stdout}`);
+      const more = r.run(['voice', '--sample', '20']);
+      eq(more.status, 0, `it voiced (${more.stderr.trim().split('\n').pop()})`);
+      const b = kept(more);
+      if (Math.abs(b.offset - 6.5) > 0.1 || Math.abs(b.length - 15.5) > 0.1) throw new Error(`20 s asked of 15.5, ${b.length}s cut from ${b.offset}s`);
+      const few = r.run(['voice', '--sample', '4']);
+      if (few.status !== 1 || !/--sample is 4: it is the seconds of speech the voice is cloned from, 5 or more/.test(few.stderr)) {
+        throw new Error(`a sample of 4 s was not refused by name: ${few.stderr}`);
+      }
+    } finally {
+      r.done();
+    }
+  });
+
   /* Directions to the voice, spoken. A clip of sine to shape, a WAV made
      here at `rate`, `frames` long and as loud as the fake engine's. */
   const voiceLib = require('./lib/voice.js');

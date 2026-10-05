@@ -23,7 +23,8 @@ so a break ships as a minor and this file is the whole of the warning.
   from a page of the server's own, and nothing else.
 - **Added:** `sipario voice` reads the script aloud in your own voice, as
   a new take that `export video` makes a video of: ten seconds of speech
-  cut from your latest live take (`--from` names another) clone the voice,
+  (`--sample` asks for more, for an engine that listens past ten) cut from
+  your latest live take (`--from` names another) clone the voice,
   a local engine named by `SIPARIO_TTS` speaks every step's notes, and a
   step with none is held silent for `--hold` seconds, two by default. Every
   clip is kept, under the engine's whole ready line, the sample and the
