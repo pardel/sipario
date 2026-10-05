@@ -186,11 +186,10 @@ that does the following is an engine:
    "out": "<path>"}`, and waits for the reply before it sends the next.
    `sample` is a WAV of the voice to speak in; `out` is where to write
    the clip, a path ending `.wav` in a folder that exists. Both are
-   absolute. A script that directs the voice (`docs/AUTHORING.md`,
-   Directing the voice) is sent as several requests, one for each run of
-   text between its pauses and changes of voice, every one with the
-   step's id; sipario makes the pauses and the changes of volume, rate
-   and pitch itself.
+   absolute. A script that directs the voice (`docs/SSML.md`) is sent
+   as several requests, one for each run of text between its pauses and
+   changes of voice, every one with the step's id; sipario makes the
+   pauses and the changes of volume, rate and pitch itself.
    - **`language`**, optional: a language tag such as `it-IT`, sent with
      a piece the script puts inside `<lang xml:lang="it-IT">`, and never
      otherwise, so a request without it is the request as it ever was.

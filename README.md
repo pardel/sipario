@@ -410,10 +410,27 @@ kept, so a run stopped part way picks up where it stopped, as long as it
 clones the same take: a newer live take voices every step again, and
 `--from` names the old one to keep its clips.
 
-A script can direct the voice with a few SSML tags: a pause, what an
-abbreviation stands for, how to read a number, a date or a phone number,
-slower, softer, higher, or another language. The notes show the script
-without them ([docs/AUTHORING.md](docs/AUTHORING.md#directing-the-voice)).
+## Directing the voice
+
+A script can tell the voice how to read it with a few SSML tags in the
+```` ```notes ```` block. sipario reads them itself, so they work the same
+with any engine, and the notes, on stage and in every export, show the
+script with them taken out. The ones most scripts need:
+
+| Tag | The voice |
+|---|---|
+| `<break time="1s"/>`, `<break strength="strong"/>` | pauses for exactly that long (up to `10s`), or 0.75 s for `strong` |
+| `<sub alias="A P I">API</sub>` | says the alias; the notes show "API" |
+| `<say-as interpret-as="date" format="dmy">3/10/2026</say-as>` | "the third of October, twenty twenty-six" |
+| `<say-as interpret-as="cardinal">1,500</say-as>` | "one thousand five hundred" |
+| `<say-as interpret-as="character">MCP</say-as>` | "M, C, P", letter by letter |
+| `<prosody rate="slow">…</prosody>` | 0.9× as fast, pitch unchanged; `x-slow` to `x-fast`, or `50%` to `200%` |
+| `<prosody volume="soft">…</prosody>` | 5 dB quieter; `x-soft` to `x-loud`, `silent`, or `-6dB` |
+
+A tag sipario cannot follow, `<emphasis>` and `<phoneme>` among them,
+stops the render rather than sitting in the script looking obeyed. Every
+tag, value and refusal, and what was measured on Qwen3-TTS:
+[docs/SSML.md](docs/SSML.md).
 
 ## Using it as a library
 
