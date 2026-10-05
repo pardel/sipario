@@ -7308,9 +7308,12 @@ function pictureLength(file, ff) {
 
     /* Each step's place is counted in frames: whole at 24 kHz, the held
        one exactly 1.5s, the 24 kHz clips exactly as the engine made them,
-       the 16 kHz ones as long once converted, to the frame, and the last
-       ending where the file does. */
+       the 16 kHz ones as long once converted, to the frame, each after the
+       first opening on the gap, 0.6 s by default, and the last ending
+       where the file does. */
     const w = readWav(path.join(dir, 'voice.wav'));
+    const gap = 0.6 * 24000;
+    eq(`${k.voice.gap} ${k.voice.fade.in} ${k.voice.fade.out}`, '0.6 0.01 0.03', 'the gap and the fades, kept');
     eq(`${w.format} ${w.bits} ${w.channels} ${w.rate}`, 'pcm 16 1 24000', 'the take\'s audio');
     const at = k.marks.map((m) => m.t * 24000);
     for (const f of at) if (Math.abs(f - Math.round(f)) > 1e-6) throw new Error(`a step begins at ${f} frames`);
@@ -7318,13 +7321,28 @@ function pictureLength(file, ff) {
     eq(lens[1], 36000, 'the held step, 1.5s to the frame');
     sent.forEach((q, n) => {
       const i = r.steps.findIndex((s) => s.id === q.id);
-      if (!(n % 2)) return eq(lens[i], Math.round(24000 * 0.02 * q.text.length) + 7, `${q.id}, as long as its clip`);
-      const want = (Math.round(16000 * 0.02 * q.text.length) + 7) * 1.5;
+      const beat = i ? gap : 0;
+      if (!(n % 2)) return eq(lens[i], Math.round(24000 * 0.02 * q.text.length) + 7 + beat, `${q.id}, as long as its clip and the gap`);
+      const want = (Math.round(16000 * 0.02 * q.text.length) + 7) * 1.5 + beat;
       if (Math.abs(lens[i] - want) > 1) throw new Error(`${q.id} runs ${lens[i]} frames; its 16 kHz clip is ${want} at 24 kHz`);
       return null;
     });
     eq(lens.reduce((a, b) => a + b, 0), w.frames, 'the steps add up to the file');
     eq(k.length, w.frames / 24000, 'and the take says how long');
+
+    /* The gap is silence, and a clip rises from nothing and falls to it:
+       the fake's sine reaches full level within a millisecond and stops
+       wherever its length leaves it. */
+    const pcm = fs.readFileSync(path.join(dir, 'voice.wav')).subarray(w.dataOffset);
+    const sampleAt = (f) => pcm.readInt16LE(f * 2);
+    const third = Math.round(at[2]);
+    for (let f = third; f < third + gap; f += 997) eq(sampleAt(f), 0, `the gap opening ${k.marks[2].id}, at frame ${f - third}`);
+    const clipAt = third + gap;
+    const end = Math.round(at[3]) - 1;
+    if (sampleAt(clipAt) !== 0 || sampleAt(end) !== 0) throw new Error(`a clip begins at ${sampleAt(clipAt)} and ends at ${sampleAt(end)}`);
+    const peak = (a, b) => { let m = 0; for (let f = a; f < b; f++) m = Math.max(m, Math.abs(sampleAt(f))); return m; };
+    if (peak(clipAt, clipAt + 24) > peak(clipAt + 480, clipAt + 960) / 4) throw new Error('the clip does not fade in over its first 10 ms');
+    if (peak(end - 24, end + 1) > peak(end - 1440, end - 720) / 4) throw new Error('the clip does not fade out over its last 30 ms');
   });
 
   whenFf('voice: sipario takes lists a voiced take by its kind and the take it came from', () => {

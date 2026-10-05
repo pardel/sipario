@@ -83,7 +83,7 @@ recording even to a reader without a detector.
 ## Running it
 
 ```
-sipario voice [path/to/talk] [--from <live take>] [--hold <seconds>] [--sample <seconds>]
+sipario voice [path/to/talk] [--from <live take>] [--hold <seconds>] [--gap <seconds>] [--sample <seconds>]
 ```
 
 1. **The sample.** From the latest live take, or the one `--from` names,
@@ -115,7 +115,12 @@ sipario voice [path/to/talk] [--from <live take>] [--hold <seconds>] [--sample <
    changing one never asks the engine again), the silences written for
    breaks and for the steps with no script, a 1 kHz tone for an
    expletive, all of it joined into
-   `voice.wav`, and `take.json` written last. Where each step begins is
+   `voice.wav`, and `take.json` written last. Every spoken clip is faded
+   in over 10 ms and out over 30 ms, because an engine starts and stops on
+   whatever the voice is doing and a clip butted to the next clicks; and
+   each step after the first opens on `--gap` seconds of silence, 0.6 by
+   default, so the slide changes, a beat, and the voice goes on. Neither
+   asks the engine again: they are put on as the take is joined. Where each step begins is
    counted in frames from the clips' own WAV headers, so the steps sit on
    their words to the sample, however long the deck.
 
@@ -144,7 +149,7 @@ the other:
     "ready": { "ready": true, "engine": "qwen3-tts", "model": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
                "version": "0.1.1", "device": "mps", "dtype": "bfloat16", "sr": 24000,
                "temperature": 0.9, "top_k": 50, "seed": "sha256('sipario:'+text)[:4]",
-               "sample": "-20 LUFS, TP -2, ends before a word cut within 0.3s, 0.4s silence",
+               "sample": "-20 LUFS, TP -2, ends after the last word heard, invented words dropped (p < 0.1), or before a word cut within 0.3s, 0.4s silence",
                "transcriber": "faster-whisper 1.2.1 medium.en",
                "length": "0.035s a char to 3s + 2.5x expected, 3 tries",
                "clip": "-20 LUFS, alimiter at -2 dBFS",
@@ -318,6 +323,9 @@ LOUDNESS = "loudnorm=I=-20:TP=-2"
 # within EDGE seconds of the end), then TAIL seconds of silence.
 EDGE = 0.3
 TAIL = 0.4
+# A word the transcriber put no time to, or barely believes, is one it
+# made up, and so is everything it heard after it.
+INVENTED = 0.1
 # Each clip is brought to CLIP_LUFS, its peaks held at CLIP_PEAK (-2 dBFS).
 CLIP_LUFS = -20
 CLIP_PEAK = 0.794
@@ -366,7 +374,8 @@ say({"ready": True, "engine": "qwen3-tts", "model": MODEL,
      "dtype": str(dtype).replace("torch.", ""), "sr": sr,
      "temperature": TEMPERATURE, "top_k": TOP_K,
      "seed": "sha256('sipario:'+text)[:4]",
-     "sample": f"-20 LUFS, TP -2, ends before a word cut within {EDGE}s, {TAIL}s silence",
+     "sample": f"-20 LUFS, TP -2, ends after the last word heard, invented words dropped (p < {INVENTED}), "
+               f"or before a word cut within {EDGE}s, {TAIL}s silence",
      "transcriber": f"faster-whisper {version('faster-whisper')} {TRANSCRIBER}",
      "length": f"0.035s a char to 3s + 2.5x expected, {TRIES} tries",
      "clip": f"{CLIP_LUFS} LUFS, alimiter at -2 dBFS",
@@ -419,19 +428,28 @@ def prepare(sample):
     if spoken < 0.5 * len(audio):
         raise ValueError(f"the sample {sample} is mostly silence: speech was heard in "
                          f"{spoken / 16000:.1f}s of its {len(audio) / 16000:.1f}s")
-    heard = lambda a: [w for s in whisper.transcribe(a, language="en", beam_size=5,
-                                                     word_timestamps=True)[0] for w in s.words]
-    said = heard(audio)
-    # sipario cuts the sample at ten seconds, mostly in the middle of a
-    # word. The transcriber hears that word whole, and Qwen3-TTS then says
-    # the rest of it before the script ("Explicit. At the same time..."),
-    # so the sample ends where that word begins, a pause after it, and what
-    # is left is transcribed again.
+    said = [w for s in whisper.transcribe(audio, language="en", beam_size=5,
+                                          word_timestamps=True)[0] for w in s.words]
+    # Whisper fills the end of a recording with words nobody said ("Thanks
+    # for watching!"), and Qwen3-TTS, told the sample says them, says them
+    # itself before every script. Such a word has no length or almost no
+    # probability, and what follows it is made up too.
+    real = next((i for i, w in enumerate(said) if w.end - w.start < 0.02 or w.probability < INVENTED), len(said))
+    if real < len(said):
+        print(f"[sipario-tts] dropped as made up: {''.join(w.word for w in said[real:]).strip()}", flush=True)
+    said = said[:real]
+    # sipario cuts the sample mostly in the middle of a word. The
+    # transcriber hears that word whole, and Qwen3-TTS then says the rest
+    # of it before the script ("Explicit. At the same time..."), so a word
+    # running to the end goes, with what it said of it.
     if said and said[-1].end > len(audio) / 16000 - EDGE:
-        cut = said[-1].start
-        audio, voice = (np.concatenate([a[:int(cut * r)], np.zeros(int(TAIL * r), np.float32)])
+        said = said[:-1]
+    # The sample ends where its last word does, so the voice says nothing
+    # its transcript does not: the next word's first sound is not in it.
+    if said:
+        end = said[-1].end
+        audio, voice = (np.concatenate([a[:int(end * r)], np.zeros(int(TAIL * r), np.float32)])
                         for a, r in ((audio, 16000), (voice, 24000)))
-        said = heard(audio)
     words = "".join(w.word for w in said).strip()
     if len(words.split()) < 3:
         raise ValueError(f"no words were heard in the sample {sample} ({words!r}), "
@@ -551,9 +569,22 @@ closer: 0.84 and 0.85 against 0.82 and 0.81, over two seeds.
 mostly in the middle of a word. The transcriber hears that word whole,
 and Qwen3-TTS then said the rest of it before the script: two of a deck's
 seven steps opened with a stray "Explicit." So the adapter ends the
-sample where a word running to within 0.3 s of the end begins, adds 0.4 s
-of silence and transcribes what is left. The same deck then opened every
-step on its own first words (2026-10-04).
+sample where the word before one running to within 0.3 s of the end
+ends, adds 0.4 s of silence, and keeps the words before it. The same deck
+then opened every step on its own first words (2026-10-04).
+
+**Why it drops words the transcriber made up.** Whisper fills the end of
+a recording with words nobody said. On a thirty-second sample of Paul
+cut into his next word, it heard "…in another. Thanks for watching!",
+and Qwen3-TTS, told the sample said that, said "Thanks for watching"
+before all 66 steps of a deck (2026-10-05). The made-up words came with
+no length and a probability of 0.03, against 0.32 for the least sure of
+the real ones on either sample tried, so the adapter keeps the words up
+to the first one that has no length or a probability under 0.1, and ends
+the sample where the last of them ends. It never transcribes twice: the
+earlier version transcribed again after adding the silence, and silence
+is where Whisper invents most ("Any other questions?" on the same
+sample).
 
 **Why it levels every clip.** Qwen3-TTS speaks at a level of its own,
 which wandered by 2.9 LU from one step of a deck to the next, with a few

@@ -26,7 +26,9 @@ so a break ships as a minor and this file is the whole of the warning.
   (`--sample` asks for more, for an engine that listens past ten) cut from
   your latest live take (`--from` names another) clone the voice,
   a local engine named by `SIPARIO_TTS` speaks every step's notes, and a
-  step with none is held silent for `--hold` seconds, two by default. Every
+  step with none is held silent for `--hold` seconds, two by default; each
+  step after the first opens on `--gap` seconds of silence, 0.6 by default,
+  and every clip is faded in and out so the joins do not click. Every
   clip is kept, under the engine's whole ready line, the sample and the
   script, so a run stopped part way picks up where it stopped while the
   engine and the take it clones stay the same. A voiced take is never
