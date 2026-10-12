@@ -160,6 +160,7 @@ is front matter, on every slide whatever renders it:
 | `id` | yes | The URL hash. Must open with the section number. |
 | `template` | yes | Which of the talk's templates renders it. Thirteen below. |
 | `align` | no | `spread`, `bottom` or `tight`. Anything else stops the render. |
+| `record` | no | `skip` leaves the slide, every step of it, out of a voiced take and so out of its video: a poll, say, that asks a room the recording does not have. Anything else stops the render. |
 | `dark` | no | `true` puts the slide on the dark ground. |
 | `kicker` | no | Small line above the heading. |
 | `caption` | no | Line under a figure or a terminal. |

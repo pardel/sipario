@@ -1167,6 +1167,19 @@ check('an unknown align value stops the render', () => {
   }
 });
 
+check('an unknown record value stops the render, and skip reaches the outline', () => {
+  const src = fs.readFileSync(TALK.deck, 'utf8');
+  let threw = null;
+  try { render(src.replace('align: spread', 'align: spread\nrecord: later'), TALK); } catch (e) { threw = e; }
+  if (!threw) throw new Error('record: later rendered as though it meant something');
+  if (!/slide 3.5 has record: later/.test(threw.message)) throw new Error(`unhelpful message: ${threw.message}`);
+  const steps = require('./lib/export.js').outline(src.replace('align: spread', 'align: spread\nrecord: skip'), TALK);
+  const off = steps.filter((s) => s.offRecord);
+  if (!off.length) throw new Error('no step carries offRecord');
+  off.forEach((s) => eq(s.n, '3.5', 'only slide 3.5 is off the record'));
+  eq(off.length, steps.filter((s) => s.n === '3.5').length, 'every step of it');
+});
+
 check('every slide declares an id, prefixed by its section', () => {
   const { parse } = require('./lib/render.js');
   const parsed = parse(fs.readFileSync(TALK.deck, 'utf8'));
@@ -7363,6 +7376,28 @@ function pictureLength(file, ff) {
       throw new Error(`it listed ${res.stdout}`);
     }
     if (!new RegExp(`${voiced.takeId}\\s+live`).test(res.stdout)) throw new Error(`the live take is not listed: ${res.stdout}`);
+  });
+
+  whenFf('voice: a slide marked record: skip is left out whole, never sent, held or marked', () => {
+    const r = rig();
+    const tt = talk(r.t);
+    const target = r.steps.find((s, i) => i > 0 && s.step === 1 && s.id !== '2-the-keys');
+    const gone = r.steps.filter((s) => s.n === target.n).map((s) => s.id);
+    const src = fs.readFileSync(tt.deck, 'utf8');
+    fs.writeFileSync(tt.deck, src.replace(`\nid: ${target.id}\n`, `\nid: ${target.id}\nrecord: skip\n`));
+    const res = r.run(['voice', '--hold', '1']);
+    eq(res.status, 0, `it voiced (${res.stderr.trim().split('\n').pop()})`);
+    if (!res.stderr.includes(`${target.n} `) || !/record: skip, left out/.test(res.stderr)) {
+      throw new Error(`it did not say what it left out: ${res.stderr}`);
+    }
+    const k = video.readTake(r.key, null, r.data);
+    for (const id of gone) {
+      if (k.marks.some((m) => m.id === id)) throw new Error(`${id} was marked`);
+      if (r.heard().some((q) => q.id === id)) throw new Error(`${id} was sent to the engine`);
+    }
+    eq(k.marks.map((m) => m.id).join(' '), r.steps.filter((s) => !gone.includes(s.id)).map((s) => s.id).join(' '),
+      'every other step marked, in the deck\'s order');
+    r.done();
   });
 
   whenBoth('voice: export video of a voiced take says it is voiced, and from which take, and runs as long as its voice', () => {

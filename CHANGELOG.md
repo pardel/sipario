@@ -6,6 +6,9 @@ so a break ships as a minor and this file is the whole of the warning.
 
 ## Unreleased
 
+- **Added:** `record: skip` in a slide's front matter leaves it out of
+  `sipario voice`: never spoken, never held, never marked, so the video of
+  that take never shows it. Any other value stops the render.
 - **Added:** recording a talk. In the notes' own window, `V` records a
   take: your voice and every step the deck shows, each marked from the deck
   window's own clock, so a step shown for an instant is kept. The audio and
